@@ -96,7 +96,7 @@ def IADDAT_PDB(input_pdb, input_IADDAT, output_filename):
         print("failed - IADDAT and residue length do not match")
     return
 
-def IADDAT(input_PDB_filename, input_MTZ_filename, threshold_value=2.5, distance_cutoff=2.5, average_out=True):
+def IADDAT(input_PDB_filename, input_MTZ_filename, threshold_value=3.0, distance_cutoff=2.5, average_out=True):
     """
     Integrate absolute difference density at a defined threshold within a defined cutoff distance of a model.
     Results will be output as an average value on a per-residue basis.
@@ -170,7 +170,7 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, threshold_value=2.5, distance
                 new_int_value = int_value / len(atom_coords)
                 IADDAT.append([chain.name, str(residue.seqid), residue.name, new_int_value])
             else:
-                IADDAT.append(int_value)
+                IADDAT.append([chain.name, str(residue.seqid), residue.name, int_value])
     
     return pd.DataFrame(IADDAT, columns=["chain","residue_number","residue_name","IADDAT"])
 
@@ -189,7 +189,7 @@ def main():
 	    epilog=""" """)
 	parser.add_argument('pdb_file', type=str, help="""Standard format for molecular models""")
 	parser.add_argument('mtz_file', type=str, help="""Standard format for molecular data storage - note that input columns are currently hard-coded""")
-	parser.add_argument('--threshold_value', type=float, default=2.5, help="""float (default=2.5)- Sigma level at which the map will be integrated""")
+	parser.add_argument('--threshold_value', type=float, default=3.0, help="""float (default=3.0)- Sigma level at which the map will be integrated""")
 	parser.add_argument('--distance_cutoff', type=float, default=2.5, help="""float (default=2.5)- Distance from model in angstroms at which the map will be integrated""")
 	parser.add_argument('--average_out', type=bool, default=True, help="""bool (default=True)- If True scale per residue IADDAT value according to number of atoms in residue""")
 
