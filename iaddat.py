@@ -1,11 +1,6 @@
 import reciprocalspaceship as rs
-# import seaborn as sns
-# import matplotlib.pyplot as plt
-# import matplotlib.pylab as pl
-# import matplotlib ### for grabbing version; comment out for efficiency
 import numpy as np
 import scipy.spatial.distance as spsd
-import scipy ### for grabbing version; comment out for efficiency
 import pandas as pd
 import glob
 import gemmi
@@ -96,7 +91,7 @@ def IADDAT_PDB(input_pdb, input_IADDAT, output_filename):
         print("failed - IADDAT and residue length do not match")
     return
 
-def IADDAT(input_PDB_filename, input_MTZ_filename, threshold_value=3.0, distance_cutoff=2.5, average_out=True):
+def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels=["FoFo", "PHFc"], threshold_value=3.0, distance_cutoff=2.5, average_out=True):
     """
     Integrate absolute difference density at a defined threshold within a defined cutoff distance of a model.
     Results will be output as an average value on a per-residue basis.
@@ -127,7 +122,11 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, threshold_value=3.0, distance
     a_sampling = int(input_MTZ.cell.a/(input_MTZ.dHKL.min()*grid_sampling))
     b_sampling = int(input_MTZ.cell.b/(input_MTZ.dHKL.min()*grid_sampling))
     c_sampling = int(input_MTZ.cell.c/(input_MTZ.dHKL.min()*grid_sampling))
-    input_MTZ["sf"] = input_MTZ.to_structurefactor("FoFo", "PHFc")
+    try:
+        input_MTZ["sf"] = input_MTZ.to_structurefactor(input_column_labels[0],input_column_labels[1])
+    except:
+	    print("error: please provide column labels in MTZ; eg: 'FoFo', 'PHFc'")
+	    exit()
     reciprocalgrid = input_MTZ.to_reciprocalgrid("sf", gridsize=(a_sampling, b_sampling, c_sampling))
     realmap = np.real(np.fft.fftn(reciprocalgrid))
     sites = find_sites(realmap, realmap.std()*threshold_value, input_MTZ.cell)
@@ -165,14 +164,18 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, threshold_value=3.0, distance
             integrate_neg = sites_neg.loc[sites_neg['filtered'] == True]
             int_neg_value = integrate_neg.height.sum()
 
-            int_value = int_pos_value + int_neg_value
+            # int_value = int_pos_value + int_neg_value
             if average_out:
-                new_int_value = int_value / len(atom_coords)
-                IADDAT.append([chain.name, str(residue.seqid), residue.name, new_int_value])
+            	scaled_int_pos_value = int_pos_value / len(atom_coords)
+            	scaled_int_neg_value = int_neg_value / len(atom_coords)
+            	IADDAT.append([chain.name, str(residue.seqid), residue.name, scaled_int_pos_value, scaled_int_neg_value])
+                # new_int_value = int_value / len(atom_coords)
+                # IADDAT.append([chain.name, str(residue.seqid), residue.name, new_int_value])
             else:
-                IADDAT.append([chain.name, str(residue.seqid), residue.name, int_value])
+                # IADDAT.append([chain.name, str(residue.seqid), residue.name, int_value])
+                IADDAT.append([chain.name, str(residue.seqid), residue.name, int_pos_value, int_neg_value])
     
-    return pd.DataFrame(IADDAT, columns=["chain","residue_number","residue_name","IADDAT"])
+    return pd.DataFrame(IADDAT, columns=["chain","residue_number","residue_name","I(+)DDAT","I(-)DDAT"])
 
 
 
@@ -183,15 +186,18 @@ def main():
 	import argparse
 
 	parser=argparse.ArgumentParser(
-	    description='''Integrate absolute difference density at a defined threshold
+	    description='''Integrate difference density at (and beyond; e.g.: >=3.0 & <=-3.0) a defined threshold
 	    within a defined cutoff distance of a model. Results will be output
 	    as an average value on a per-residue basis.''',
 	    epilog=""" """)
 	parser.add_argument('pdb_file', type=str, help="""Standard format for molecular models""")
-	parser.add_argument('mtz_file', type=str, help="""Standard format for molecular data storage - note that input columns are currently hard-coded""")
+	parser.add_argument('mtz_file', type=str, help="""Standard format for molecular data storage - note that input columns are currently hard-coded as 'FoFo, PHFc'""")
 	parser.add_argument('--threshold_value', type=float, default=3.0, help="""float (default=3.0)- Sigma level at which the map will be integrated""")
 	parser.add_argument('--distance_cutoff', type=float, default=2.5, help="""float (default=2.5)- Distance from model in angstroms at which the map will be integrated""")
-	parser.add_argument('--average_out', type=bool, default=True, help="""bool (default=True)- If True scale per residue IADDAT value according to number of atoms in residue""")
+	parser.add_argument('--column_labels', default="FoFo, PHFc", type=str, help="""str (default=["FoFo", "PHFc"])- Set labels for difference structure factors and phi values""")
+	parser.add_argument('--average_out', action='store_true',  help="""Default: scales avg IADDAT per residue / number of atoms in residue""")
+	parser.add_argument('--no-average_out', dest='average_out', action='store_false',  help="""Turns off scaling per number of atoms in residue""")
+	parser.set_defaults(average_out=True)
 
 
 	args=parser.parse_args()
@@ -205,16 +211,19 @@ def main():
 	    print("error: Must provide MTZ file for integration")
 	    parser.print_help()
 	    exit(1)
-	print(args.pdb_file)
-	print(args.mtz_file)
-	print(args.threshold_value)
-	print(args.distance_cutoff)
-	print(args.average_out)
+	if args.column_labels:
+		column_labels = [args.column_labels.split(',')[0], args.column_labels.split(',')[1]]
+		if len(column_labels) != 2:
+		    print("error: Must provide column labels for FoFo and PhiF in a single comma-separated string; e.g.: 'FoFo, PHFc'")
+		    parser.print_help()
+		    exit(1)
+	print("Integrating {} using {} at {} sigma within {} angstroms of {}".format(args.mtz_file, column_labels, args.threshold_value, args.distance_cutoff, args.pdb_file))
+	print("Per residue IADDAT values scaled by number of atoms per residue = {}".format(args.average_out))
 
-	iaddat_df = IADDAT(args.pdb_file, args.mtz_file, args.threshold_value, args.distance_cutoff, args.average_out)
+	iaddat_df = IADDAT(args.pdb_file, args.mtz_file, column_labels, args.threshold_value, args.distance_cutoff, args.average_out)
 	pdb_string = str(args.pdb_file).split("/")[-1].replace('.pdb','')
 	mtz_string = str(args.mtz_file).split("/")[-1].replace('.mtz','')
-	output_excel_string = pdb_string+"_"+mtz_string+".xlsx"
+	output_excel_string = pdb_string+"_"+mtz_string+"_integrated-{}-sigma".format(str(args.threshold_value))+"_within-{}-angstroms".format(str(args.distance_cutoff))+".xlsx"
 	iaddat_df.to_excel(output_excel_string)
 	return
 
