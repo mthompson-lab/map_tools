@@ -94,7 +94,7 @@ def IADDAT_PDB(input_pdb, input_IADDAT, output_filename):
 def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHFc", threshold_value=3.0, distance_cutoff=2.5):
     """
     Integrate absolute difference density at a defined threshold within a defined cutoff distance of a model.
-    Results will be output as an average value on a per-residue basis.
+    Results will be output on a per-atom basis.
 
     Parameters
     ----------
@@ -106,8 +106,6 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHF
         Sigma level at which the map will be integrated
     distance_cutoff : float
         Distance from model in angstroms at which the map will be integrated
-    average_out : bool
-        If True (default) scale per residue IADDAT value according to number of atoms in residue
 
     Returns
     -------
@@ -182,7 +180,6 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHF
 
 def main():
 
-    # from sys import argv
     import argparse
 
     parser=argparse.ArgumentParser(
@@ -195,14 +192,6 @@ def main():
     parser.add_argument('--threshold_value', type=float, default=3.0, help="""float (default=3.0)- Sigma level at which the map will be integrated""")
     parser.add_argument('--distance_cutoff', type=float, default=2.5, help="""float (default=2.5)- Distance from model in angstroms at which the map will be integrated""")
     parser.add_argument('--column_labels', default="FoFo,PHFc", type=str, help="""str (default='FoFo, PHFc')- Set labels for difference structure factors and phi values""")
-    # parser.add_argument('--average_out', action='store_true',  help="""Scales avg IADDAT per residue / number of atoms in residue; off by default""")
-    # parser.add_argument('--polyA', action='store_true',  help="""Cut each residue to Ala - closer approximation to backbone only; off by default""")
-    # parser.add_argument('--no_water', action='store_true',  help="""Remove ordered solvent molecules from analysis; off by default""")
-    # parser.set_defaults(average_out=False)
-    # parser.set_defaults(polyA=False)
-    # parser.set_defaults(no_water=False)
-
-
     args=parser.parse_args()
 
     if not args.pdb_file:
@@ -221,10 +210,6 @@ def main():
             parser.print_help()
             exit(1)
     print("Integrating {} using {} at {} sigma within {} angstroms of {}".format(args.mtz_file, column_labels, args.threshold_value, args.distance_cutoff, args.pdb_file))
-    # print("Per residue IADDAT values scaled by number of atoms per residue = {}".format(args.average_out))
-    # print("Residues truncated to Ala = {}".format(args.polyA))
-
-    # iaddat_df = IADDAT(args.pdb_file, args.mtz_file, args.column_labels, args.threshold_value, args.distance_cutoff, args.average_out, args.polyA, args.no_water)
     iaddat_df = IADDAT(args.pdb_file, args.mtz_file, args.column_labels, args.threshold_value, args.distance_cutoff)
     pdb_string = str(args.pdb_file).split("/")[-1].replace('.pdb','')
     mtz_string = str(args.mtz_file).split("/")[-1].replace('.mtz','')
