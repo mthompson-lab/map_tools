@@ -177,9 +177,9 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHF
                 integrate_neg = sites_neg.loc[sites_neg['filtered'] == True]
                 int_neg_value = integrate_neg.height.sum()
                 ### negative vectors
-                integrate_neg["vec_x"] = integrate_neg["x"] - atom_coords_df["x"][0]
-                integrate_neg["vec_y"] = integrate_neg["y"] - atom_coords_df["y"][0]
-                integrate_neg["vec_z"] = integrate_neg["z"] - atom_coords_df["z"][0]
+                integrate_neg["vec_x"] = atom_coords_df["x"][0] - integrate_neg["x"]
+                integrate_neg["vec_y"] = atom_coords_df["y"][0] - integrate_neg["y"]
+                integrate_neg["vec_z"] = atom_coords_df["z"][0] - integrate_neg["z"]
                 integrate_neg["vec_x_weighted"] = integrate_neg['vec_x']*integrate_neg['height']
                 integrate_neg["vec_y_weighted"] = integrate_neg['vec_y']*integrate_neg['height']
                 integrate_neg["vec_z_weighted"] = integrate_neg['vec_z']*integrate_neg['height']
