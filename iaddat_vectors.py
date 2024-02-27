@@ -1,11 +1,8 @@
-import reciprocalspaceship as rs
 import numpy as np
 import scipy.spatial.distance as spsd
 import pandas as pd
 import glob
 import gemmi
-
-
 
 
 def find_sites(realmap, threshold, cell):
@@ -31,67 +28,13 @@ def find_sites(realmap, threshold, cell):
     data = []
     for p in peaks:
         pf = p/np.array(realmap.shape)
-        pf_2 = pf + np.array([-1, 0, 0])
-        pf_3 = pf + np.array([0, -1, 0])
-        pf_4 = pf + np.array([0, 0, -1])
-        pf_5 = pf + np.array([-1, -1, 0])
-        pf_6 = pf + np.array([-1, 0, -1])
-        pf_7 = pf + np.array([0, -1, -1])
-        pf_8 = pf + np.array([-1, -1, -1])
         pos = cell.orthogonalize(gemmi.Fractional(*pf))
-        pos_2 = cell.orthogonalize(gemmi.Fractional(*pf_2))
-        pos_3 = cell.orthogonalize(gemmi.Fractional(*pf_3))
-        pos_4 = cell.orthogonalize(gemmi.Fractional(*pf_4))
-        pos_5 = cell.orthogonalize(gemmi.Fractional(*pf_5))
-        pos_6 = cell.orthogonalize(gemmi.Fractional(*pf_6))
-        pos_7 = cell.orthogonalize(gemmi.Fractional(*pf_7))
-        pos_8 = cell.orthogonalize(gemmi.Fractional(*pf_8))
         d  = {"x": pos.x, "y": pos.y, "z": pos.z}
-        d_2  = {"x": pos_2.x, "y": pos_2.y, "z": pos_2.z}
-        d_3  = {"x": pos_3.x, "y": pos_3.y, "z": pos_3.z}
-        d_4  = {"x": pos_4.x, "y": pos_4.y, "z": pos_4.z}
-        d_5  = {"x": pos_5.x, "y": pos_5.y, "z": pos_5.z}
-        d_6  = {"x": pos_6.x, "y": pos_6.y, "z": pos_6.z}
-        d_7  = {"x": pos_7.x, "y": pos_7.y, "z": pos_7.z}
-        d_8  = {"x": pos_8.x, "y": pos_8.y, "z": pos_8.z}
         d["height"] = realmap[p[0], p[1], p[2]]
-        d_2["height"] = realmap[p[0], p[1], p[2]]
-        d_3["height"] = realmap[p[0], p[1], p[2]]
-        d_4["height"] = realmap[p[0], p[1], p[2]]
-        d_5["height"] = realmap[p[0], p[1], p[2]]
-        d_6["height"] = realmap[p[0], p[1], p[2]]
-        d_7["height"] = realmap[p[0], p[1], p[2]]
-        d_8["height"] = realmap[p[0], p[1], p[2]]
         data.append(d)
-        data.append(d_2)
-        data.append(d_3)
-        data.append(d_4)
-        data.append(d_5)
-        data.append(d_6)
-        data.append(d_7)
-        data.append(d_8)
     return pd.DataFrame(data)
 
-
-def IADDAT_PDB(input_pdb, input_IADDAT, output_filename):
-    res_count = 0
-    for chain in input_pdb[0]:
-        for residue in chain:
-            res_count+=1
-    if res_count == len(input_IADDAT):
-        n = 0
-        model = input_pdb[0]
-        for chain in model:
-            for residue in chain:
-                for atom in residue:
-                    atom.b_iso = input_IADDAT[n]
-                n+=1
-        input_pdb.write_minimal_pdb(output_filename)
-    else:
-        print("failed - IADDAT and residue length do not match")
-    return
-
-def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHFc", threshold_value=3.0, distance_cutoff=2.5):
+def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHFc", threshold_value=3.0, distance_cutoff=1.2):
     """
     Integrate absolute difference density at a defined threshold within a defined cutoff distance of a model.
     Results will be output on a per-atom basis.
@@ -119,20 +62,18 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHF
     #     pass
     input_PDB.remove_hydrogens()
     input_PDB.remove_empty_chains()
-    input_MTZ = rs.read_mtz(input_MTZ_filename)
-    input_MTZ.compute_dHKL(inplace=True)
-    grid_sampling = 0.25
-    a_sampling = int(input_MTZ.cell.a/(input_MTZ.dHKL.min()*grid_sampling))
-    b_sampling = int(input_MTZ.cell.b/(input_MTZ.dHKL.min()*grid_sampling))
-    c_sampling = int(input_MTZ.cell.c/(input_MTZ.dHKL.min()*grid_sampling))
+    input_MTZ = gemmi.read_mtz_file(input_MTZ_filename)
     try:
         column_labels = [input_column_labels.split(',')[0], input_column_labels.split(',')[1]]
-        input_MTZ["sf"] = input_MTZ.to_structurefactor(column_labels[0],column_labels[1])
+        column_labels in input_MTZ.column_labels()
     except:
         print("error: please provide column labels in MTZ; eg: 'FoFo,PHFc'")
+        print("       columns in file: {}".format(input_MTZ.column_labels()))
         exit()
-    reciprocalgrid = input_MTZ.to_reciprocalgrid("sf", gridsize=(a_sampling, b_sampling, c_sampling))
-    realmap = np.real(np.fft.fftn(reciprocalgrid))
+    mtz_fphi = input_MTZ.get_f_phi(column_labels[0], column_labels[1])
+    sf  = mtz_fphi.transform_f_phi_to_map(sample_rate=4)
+    asu_map = sf.masked_asu()
+    realmap = np.array(asu_map.grid, copy=False)
     sites = find_sites(realmap, realmap.std()*threshold_value, input_MTZ.cell)
     sites_neg = find_sites(realmap*-1, realmap.std()*threshold_value, input_MTZ.cell)
     sites_coords = np.array([sites.x, sites.y, sites.z])
@@ -214,7 +155,7 @@ def main():
     parser.add_argument('pdb_file', type=str, help="""Standard format for molecular models""")
     parser.add_argument('mtz_file', type=str, help="""Standard format for molecular data storage - note that input columns are currently hard-coded as 'FoFo, PHFc'""")
     parser.add_argument('--threshold_value', type=float, default=3.0, help="""float (default=3.0)- Sigma level at which the map will be integrated""")
-    parser.add_argument('--distance_cutoff', type=float, default=2.5, help="""float (default=2.5)- Distance from model in angstroms at which the map will be integrated""")
+    parser.add_argument('--distance_cutoff', type=float, default=1.2, help="""float (default=2.5)- Distance from model in angstroms at which the map will be integrated""")
     parser.add_argument('--column_labels', default="FoFo,PHFc", type=str, help="""str (default='FoFo, PHFc')- Set labels for difference structure factors and phi values""")
     args=parser.parse_args()
 
