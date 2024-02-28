@@ -149,13 +149,13 @@ def main():
 
     parser=argparse.ArgumentParser(
         description='''Integrate difference density at (and beyond; e.g.: >=3.0 & <=-3.0) a defined threshold
-        within a defined cutoff distance of a model. Results will be output
-        as an average value on a per-residue basis.''',
+        within a defined cutoff distance of a model. Calculate vector pointing towards positive density
+        and away from negative density. Results will be output on a per-atom basis.''',
         epilog=""" """)
     parser.add_argument('pdb_file', type=str, help="""Standard format for molecular models""")
     parser.add_argument('mtz_file', type=str, help="""Standard format for molecular data storage - note that input columns are currently hard-coded as 'FoFo, PHFc'""")
     parser.add_argument('--threshold_value', type=float, default=3.0, help="""float (default=3.0)- Sigma level at which the map will be integrated""")
-    parser.add_argument('--distance_cutoff', type=float, default=1.2, help="""float (default=2.5)- Distance from model in angstroms at which the map will be integrated""")
+    parser.add_argument('--distance_cutoff', type=float, default=1.2, help="""float (default=1.2)- Distance from model in angstroms at which the map will be integrated""")
     parser.add_argument('--column_labels', default="FoFo,PHFc", type=str, help="""str (default='FoFo, PHFc')- Set labels for difference structure factors and phi values""")
     args=parser.parse_args()
 
