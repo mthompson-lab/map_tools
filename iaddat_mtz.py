@@ -124,7 +124,8 @@ def IADDAT(input_PDB_filename, input_MTZ_filename, input_column_labels="FoFo,PHF
                 else:
                     IADDAT.append([chain.name, str(residue.seqid), residue.name, atom.name, "None", int_pos_value, int_neg_value])
     pdb_string = input_PDB_filename.split("/")[-1].replace('.pdb','')
-    output_pdb_string = pdb_string+"_total-IADDAT-in-B-iso-{}-{}".format(str(threshold_value), threshold_type)+"_within-{}-angstroms".format(str(distance_cutoff))+".pdb"
+    mtz_string = input_MTZ_filename.split("/")[-1].replace('.mtz','')
+    output_pdb_string = pdb_string+"_"+mtz_string+"_total-IADDAT-in-B-iso-{}-{}".format(str(threshold_value), threshold_type)+"_within-{}-angstroms".format(str(distance_cutoff))+".pdb"
     input_PDB.write_minimal_pdb(output_pdb_string)
     return pd.DataFrame(IADDAT, columns=["chain","residue_number","residue_name","atom_name", "atom_altloc","I(+)DDAT","I(-)DDAT"])
 
