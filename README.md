@@ -1,7 +1,7 @@
 # map_tools
 library of map tools - beginning with IADDAT and expanding
 
-## example from iaddat_mtz.py
+### example usage of iaddat_mtz.py
 ```
 usage: python iaddat_mtz.py pdb_file mtz_file
 
