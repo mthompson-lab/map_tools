@@ -3,7 +3,7 @@ library of map tools - beginning with IADDAT and expanding
 
 ## example from iaddat_mtz.py
 ```
-usage: iaddat_mtz.py [-h] [--threshold_value THRESHOLD_VALUE] [--threshold_type {sigma,absolute}] [--distance_cutoff DISTANCE_CUTOFF] [--column_labels COLUMN_LABELS] pdb_file mtz_file
+usage: python iaddat_mtz.py [-h] [--threshold_value THRESHOLD_VALUE] [--threshold_type {sigma,absolute}] [--distance_cutoff DISTANCE_CUTOFF] [--column_labels COLUMN_LABELS] pdb_file mtz_file
 
 Integrate difference density at (and beyond; e.g.: >=3.0 & <=-3.0) a defined threshold within a defined cutoff distance of a model. Results will be output on a per-atom basis.
 
