@@ -154,9 +154,12 @@ def IADDAT_integrator(IADDAT_peaks_df, input_PDB_filename, input_MTZ_filename, t
         for residue in chain:
             per_resi_IADDAT = []
             for atom in residue:
-                peaks = IADDAT_peaks_df.query('coordx=={} and coordy=={} and coordz=={}'.format(atom.pos.x, atom.pos.y, atom.pos.z))
-                unique = np.unique(peaks['peak'])
-                total_IADDAT = np.abs(unique).sum()
+                try:
+                    peaks = IADDAT_peaks_df.query('coordx=={} and coordy=={} and coordz=={}'.format(atom.pos.x, atom.pos.y, atom.pos.z))
+                    unique = np.unique(peaks['peak'])
+                    total_IADDAT = np.abs(unique).sum()
+                except:
+                    total_IADDAT = 0
                 per_resi_IADDAT.append(total_IADDAT)
                 atom.b_iso = total_IADDAT
                 if atom.has_altloc():
@@ -169,6 +172,8 @@ def IADDAT_integrator(IADDAT_peaks_df, input_PDB_filename, input_MTZ_filename, t
     input_PDB.write_minimal_pdb(output_pdb_string)
     iaddat_df = pd.DataFrame(IADDAT, columns=["chain","residue_number","residue_name","atom_name", "atom_altloc","IADDAT"])
     iaddat_df.to_excel(df_excel_string)
+    if iaddat_df['IADDAT'].sum() == 0:
+        print("Warning: all IADDAT Values are 0 - inspect data and reconsider threshold_value, distance_cutoff, and ensure model matches map")
     return
 
 
