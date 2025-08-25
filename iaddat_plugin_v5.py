@@ -598,8 +598,8 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             import gemmi
             structure = gemmi.read_structure(pdb_file)
             
-            # Extract unique symmetry operations from the peaks data
-            # We can infer transformations from coord->mark mappings
+            # Extract unique symmetry operations from the peaks data using image_idx
+            # This uses proper crystallographic symmetry operations instead of coord->mark mappings
             transformations = self.extract_symmetry_transformations(peaks_df, structure)
             
             sym_objects = []
@@ -634,56 +634,60 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             return self.create_symmetry_pseudoatoms(peaks_df, base_obj)
     
     def extract_symmetry_transformations(self, peaks_df, structure):
-        """Extract crystallographic transformations from coord->mark mappings"""
+        """Extract crystallographic transformations from image_idx values using proper symmetry operations"""
         try:
-            # Group unique coordinate mappings
-            coord_mappings = peaks_df[['coordx', 'coordy', 'coordz', 'markx', 'marky', 'markz']].drop_duplicates()
+            # Check if image_idx column exists
+            if 'image_idx' not in peaks_df.columns:
+                print("Warning: image_idx column not found in peaks DataFrame. Cannot extract proper symmetry operations.")
+                return []
             
-            transformations = []
-            tolerance = 0.01
+            # Get unique image_idx values from the peaks data
+            unique_image_indices = peaks_df['image_idx'].unique()
+            print(f"Found {len(unique_image_indices)} unique symmetry operations (image_idx values): {unique_image_indices}")
             
-            # Try to find transformation matrices that map coord->mark positions
-            unique_transformations = []
+            # Get the space group from the structure
+            spacegroup = structure.spacegroup_hm
+            sg = gemmi.SpaceGroup(spacegroup)
+            operations = sg.operations()
             
-            for _, mapping in coord_mappings.iterrows():
-                coord = np.array([mapping['coordx'], mapping['coordy'], mapping['coordz']])
-                mark = np.array([mapping['markx'], mapping['marky'], mapping['markz']])
-                
-                # Calculate the translation vector
-                translation = mark - coord
-                
-                # Check if this translation is already found (within tolerance)
-                is_new = True
-                for existing_trans in unique_transformations:
-                    if np.linalg.norm(translation - existing_trans['translation']) < tolerance:
-                        is_new = False
-                        break
-                
-                if is_new:
-                    # For now, assume only translation (could be extended for rotation)
-                    transform_matrix = np.array([
-                        [1.0, 0.0, 0.0, translation[0]],
-                        [0.0, 1.0, 0.0, translation[1]],
-                        [0.0, 0.0, 1.0, translation[2]],
-                        [0.0, 0.0, 0.0, 1.0]
-                    ])
-                    
-                    unique_transformations.append({
-                        'translation': translation,
-                        'matrix': transform_matrix
-                    })
+            print(f"Structure space group: {spacegroup}")
+            print(f"Space group has {len(operations)} symmetry operations")
             
-            # Convert to PyMOL format (flattened 4x4 matrix)
+            # Create transformation matrices for each unique image_idx
             pymol_transforms = []
-            for trans in unique_transformations:
-                # PyMOL expects a flattened 16-element list
-                flat_matrix = trans['matrix'].flatten().tolist()
-                pymol_transforms.append(flat_matrix)
+            operations_list = list(operations)  # Convert to list for indexing
             
+            for image_idx in sorted(unique_image_indices):
+                if image_idx >= len(operations_list):
+                    print(f"Warning: image_idx {image_idx} exceeds available operations ({len(operations_list)})")
+                    continue
+                    
+                # Get the crystallographic operation for this image_idx
+                op = operations_list[image_idx]
+                
+                # Convert gemmi's 24-based rotation and translation to proper matrices
+                rot_matrix = np.array(op.rot) / 24.0  # gemmi uses 24-based system
+                trans_vector = np.array(op.tran) / 24.0  # same for translation
+                
+                # Create 4x4 transformation matrix for PyMOL
+                transform_4x4 = np.eye(4)
+                transform_4x4[:3, :3] = rot_matrix
+                transform_4x4[:3, 3] = trans_vector
+                
+                # Convert to PyMOL format (flattened 16-element list)
+                flat_matrix = transform_4x4.flatten().tolist()
+                pymol_transforms.append(flat_matrix)
+                
+                print(f"Image_idx {image_idx}: Rotation\n{rot_matrix}")
+                print(f"Image_idx {image_idx}: Translation {trans_vector}")
+            
+            print(f"Generated {len(pymol_transforms)} crystallographic transformation matrices")
             return pymol_transforms
             
         except Exception as e:
-            print(f"Error extracting transformations: {e}")
+            print(f"Error extracting crystallographic transformations: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def generate_vector_analytics(self, peaks_df):
@@ -866,6 +870,7 @@ def IADDAT_peaks_table(input_PDB_filename, input_MTZ_filename, input_column_labe
                 "markx": mark.pos.x,
                 "marky": mark.pos.y,
                 "markz": mark.pos.z,
+                "image_idx": mark.image_idx,
                 "mol_COM": COM.tolist(),
                 "deltax": peak.x - mark.pos.x,
                 "deltay": peak.y - mark.pos.y,
@@ -884,7 +889,7 @@ def IADDAT_peaks_table(input_PDB_filename, input_MTZ_filename, input_column_labe
         print("Warning: No peaks found within distance cutoff")
         required_columns = ["chain", "seqid", "residue", "atom", "altloc", "dist", "peak", 
                            "coordx", "coordy", "coordz", "peakx", "peaky", "peakz", 
-                           "markx", "marky", "markz", "mol_COM", "deltax", "deltay", "deltaz"]
+                           "markx", "marky", "markz", "image_idx", "mol_COM", "deltax", "deltay", "deltaz"]
         df = pd.DataFrame(columns=required_columns)
     
     return df
