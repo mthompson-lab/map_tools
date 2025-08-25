@@ -70,6 +70,7 @@ def IADDAT(input_PDB_filename, input_CCP4_filename, threshold_value=3, distance_
                 "coordx"  :    cra.atom.pos.x,
                 "coordy"  :    cra.atom.pos.y,
                 "coordz"  :    cra.atom.pos.z,
+                "image_idx":   mark.image_idx,
                 "deltax"  :    blob.centroid.x - mark.pos.x, ### vector points toward blob
                 "deltay"  :    blob.centroid.y - mark.pos.y, ### vector points toward blob
                 "deltaz"  :    blob.centroid.z - mark.pos.z, ### vector points toward blob
@@ -103,6 +104,7 @@ def IADDAT(input_PDB_filename, input_CCP4_filename, threshold_value=3, distance_
                 "coordx"  :    cra.atom.pos.x,
                 "coordy"  :    cra.atom.pos.y,
                 "coordz"  :    cra.atom.pos.z,
+                "image_idx":   mark.image_idx,
                 "deltax"  :    mark.pos.x - blob.centroid.x, ### vector points away from blob
                 "deltay"  :    mark.pos.y - blob.centroid.y, ### vector points away from blob
                 "deltaz"  :    mark.pos.z - blob.centroid.z, ### vector points away from blob
