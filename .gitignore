@@ -1,3 +1,7 @@
 *.ipynb
 *coot*
 __pycache__/
+*.pyc
+.DS_Store
+*.tmp
+.pytest_cache/
