@@ -112,6 +112,7 @@ def IADDAT(input_PDB_filename, input_CCP4_filename, threshold_value=3, distance_
                 "markx"   :    mark.pos.x,
                 "marky"   :    mark.pos.y,
                 "markz"   :    mark.pos.z,
+                "image_idx":   mark.image_idx,
                 "mol_COM" :    COM.tolist(),
                 "deltax"  :    peak.x - mark.pos.x, ### vector points toward blob
                 "deltay"  :    peak.y - mark.pos.y, ### vector points toward blob

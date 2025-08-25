@@ -127,6 +127,7 @@ def IADDAT_peaks_table(input_PDB_filename, input_MTZ_filename, input_column_labe
                 "markx"   :    mark.pos.x,
                 "marky"   :    mark.pos.y,
                 "markz"   :    mark.pos.z,
+                "image_idx":   mark.image_idx,
                 "mol_COM" :    COM.tolist(),
                 "deltax"  :    peak.x - mark.pos.x, ### vector points toward blob
                 "deltay"  :    peak.y - mark.pos.y, ### vector points toward blob
