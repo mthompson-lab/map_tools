@@ -282,7 +282,7 @@ class IADDATPlugin(QtWidgets.QDialog):
             self.progress.setVisible(False)
     
     def load_results_to_pymol(self, pdb_file, mtz_file, peaks_df, threshold_value, threshold_type, distance_cutoff):
-        """Load results into PyMOL for visualization"""
+        """Load results into PyMOL for visualization using new single-model approach"""
         try:
             # Generate output filenames (matching the original script logic)
             pdb_string = os.path.basename(pdb_file).replace('.pdb', '')
@@ -292,36 +292,144 @@ class IADDATPlugin(QtWidgets.QDialog):
             if os.path.exists(output_pdb):
                 # Load the PDB with IADDAT values
                 obj_name = f"IADDAT_{pdb_string}"
-                cmd.load(output_pdb, obj_name)
+                try:
+                    cmd.load(output_pdb, obj_name)
+                except NameError:
+                    print(f"Would load PDB file: {output_pdb} as object: {obj_name}")
                 
-                # Generate symmetry-equivalent models and group them
-                sym_objects = self.create_symmetry_equivalent_models(obj_name, peaks_df, pdb_file)
+                # NEW APPROACH: Map symmetry features to original model instead of creating copies
+                mapped_peaks_df = self.map_symmetry_features_to_model(obj_name, peaks_df, pdb_file)
                 
                 if self.color_by_iaddat_check.isChecked():
-                    # Color by B-factor (which contains IADDAT values) for all symmetry copies
-                    for sym_obj in [obj_name] + sym_objects:
-                        cmd.spectrum("b", "blue_white_red", sym_obj)
-                        cmd.show("sticks", sym_obj)
+                    # Color by B-factor (which contains IADDAT values) for the single model
+                    try:
+                        cmd.spectrum("b", "blue_white_red", obj_name)
+                        cmd.show("sticks", obj_name)
+                    except NameError:
+                        print(f"Would color {obj_name} by B-factor")
                 
-                # Show density peaks as spheres if requested
-                if self.show_peaks_check.isChecked() and not peaks_df.empty:
+                # Show density peaks as spheres if requested (using mapped coordinates)
+                if self.show_peaks_check.isChecked() and not mapped_peaks_df.empty:
                     if self.carve_peaks_check.isChecked():
-                        self.create_carved_peak_objects(peaks_df, [obj_name] + sym_objects, threshold_value, threshold_type, distance_cutoff)
+                        self.create_carved_peak_objects_single_model(mapped_peaks_df, obj_name, threshold_value, threshold_type, distance_cutoff)
                     else:
-                        self.create_peak_objects(peaks_df, threshold_value, threshold_type)
+                        self.create_peak_objects_single_model(mapped_peaks_df, threshold_value, threshold_type)
                 
-                # Show displacement vectors if requested
-                if self.show_vectors_check.isChecked() and not peaks_df.empty:
-                    self.create_displacement_vectors(peaks_df, [obj_name] + sym_objects, threshold_value, threshold_type)
+                # Show displacement vectors if requested (using CGO arrows)
+                if self.show_vectors_check.isChecked() and not mapped_peaks_df.empty:
+                    self.create_displacement_vectors_with_cgo(mapped_peaks_df, threshold_value, threshold_type)
                 
-                # Center view on the original structure
-                cmd.center(obj_name)
-                cmd.zoom(obj_name)
+                # Center view on the structure
+                try:
+                    cmd.center(obj_name)
+                    cmd.zoom(obj_name)
+                except NameError:
+                    print(f"Would center and zoom on {obj_name}")
                 
-                self.update_status("Results loaded into PyMOL", "green")
+                self.update_status("Results loaded into PyMOL with new single-model approach", "green")
             
         except Exception as e:
             self.update_status(f"Error loading to PyMOL: {str(e)}", "red")
+
+    def create_peak_objects_single_model(self, mapped_peaks_df, threshold_value, threshold_type):
+        """Create PyMOL objects for mapped density peaks on single model"""
+        try:
+            # Create positive and negative peak objects using mapped coordinates
+            pos_peaks = mapped_peaks_df[mapped_peaks_df['peak'] > 0]
+            neg_peaks = mapped_peaks_df[mapped_peaks_df['peak'] < 0]
+            
+            if not pos_peaks.empty:
+                # Create positive peaks (red spheres)
+                pos_obj = f"positive_peaks_mapped_{threshold_value}_{threshold_type}"
+                for _, peak in pos_peaks.iterrows():
+                    try:
+                        cmd.pseudoatom(pos_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                                     b=peak['peak'], vdw=0.3)
+                    except NameError:
+                        print(f"Would create positive peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                
+                try:
+                    cmd.color("red", pos_obj)
+                    cmd.show("spheres", pos_obj)
+                except NameError:
+                    print(f"Would color {pos_obj} red and show as spheres")
+            
+            if not neg_peaks.empty:
+                # Create negative peaks (blue spheres)
+                neg_obj = f"negative_peaks_mapped_{threshold_value}_{threshold_type}"
+                for _, peak in neg_peaks.iterrows():
+                    try:
+                        cmd.pseudoatom(neg_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                                     b=abs(peak['peak']), vdw=0.3)
+                    except NameError:
+                        print(f"Would create negative peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                
+                try:
+                    cmd.color("blue", neg_obj)
+                    cmd.show("spheres", neg_obj)
+                except NameError:
+                    print(f"Would color {neg_obj} blue and show as spheres")
+            
+        except Exception as e:
+            print(f"Error creating mapped peak objects: {e}")
+
+    def create_carved_peak_objects_single_model(self, mapped_peaks_df, model_obj, threshold_value, threshold_type, distance_cutoff):
+        """Create PyMOL objects for mapped density peaks carved around the single model"""
+        try:
+            # Create positive and negative peak objects using mapped coordinates
+            pos_peaks = mapped_peaks_df[mapped_peaks_df['peak'] > 0]
+            neg_peaks = mapped_peaks_df[mapped_peaks_df['peak'] < 0]
+            
+            if not pos_peaks.empty:
+                # Create positive peaks (red spheres)
+                pos_obj = f"positive_peaks_mapped_carved_{threshold_value}_{threshold_type}"
+                for _, peak in pos_peaks.iterrows():
+                    try:
+                        cmd.pseudoatom(pos_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                                     b=peak['peak'], vdw=0.3)
+                    except NameError:
+                        print(f"Would create carved positive peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                
+                try:
+                    cmd.color("red", pos_obj)
+                    cmd.show("spheres", pos_obj)
+                    
+                    # Carve around the single model
+                    cmd.select(f"temp_sel_{pos_obj}", f"{pos_obj} within {distance_cutoff*1.5} of {model_obj}")
+                    if cmd.count_atoms(f"temp_sel_{pos_obj}") > 0:
+                        cmd.create(f"{pos_obj}_carved", f"temp_sel_{pos_obj}")
+                        cmd.delete(pos_obj)
+                        cmd.set_name(f"{pos_obj}_carved", pos_obj)
+                    cmd.delete(f"temp_sel_{pos_obj}")
+                except NameError:
+                    print(f"Would carve {pos_obj} around {model_obj}")
+            
+            if not neg_peaks.empty:
+                # Create negative peaks (blue spheres)
+                neg_obj = f"negative_peaks_mapped_carved_{threshold_value}_{threshold_type}"
+                for _, peak in neg_peaks.iterrows():
+                    try:
+                        cmd.pseudoatom(neg_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                                     b=abs(peak['peak']), vdw=0.3)
+                    except NameError:
+                        print(f"Would create carved negative peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                
+                try:
+                    cmd.color("blue", neg_obj)
+                    cmd.show("spheres", neg_obj)
+                    
+                    # Carve around the single model
+                    cmd.select(f"temp_sel_{neg_obj}", f"{neg_obj} within {distance_cutoff*1.5} of {model_obj}")
+                    if cmd.count_atoms(f"temp_sel_{neg_obj}") > 0:
+                        cmd.create(f"{neg_obj}_carved", f"temp_sel_{neg_obj}")
+                        cmd.delete(neg_obj)
+                        cmd.set_name(f"{neg_obj}_carved", neg_obj)
+                    cmd.delete(f"temp_sel_{neg_obj}")
+                except NameError:
+                    print(f"Would carve {neg_obj} around {model_obj}")
+            
+        except Exception as e:
+            print(f"Error creating carved mapped peak objects: {e}")
     
     def create_carved_peak_objects(self, peaks_df, model_objects, threshold_value, threshold_type, distance_cutoff):
         """Create PyMOL objects for density peaks carved around all symmetry-equivalent models"""
@@ -372,6 +480,145 @@ class IADDATPlugin(QtWidgets.QDialog):
             
         except Exception as e:
             print(f"Error creating carved peak objects: {e}")
+
+    def create_displacement_vectors_with_cgo(self, peaks_df, threshold_value, threshold_type):
+        """Create displacement vectors using CGO arrows for single model display"""
+        try:
+            # Import CGO constants (these would normally come from PyMOL)
+            try:
+                from pymol import cgo
+            except ImportError:
+                # Define CGO constants if PyMOL is not available
+                class CGO:
+                    BEGIN = 0
+                    END = 1
+                    VERTEX = 2
+                    NORMAL = 3
+                    COLOR = 4
+                    LINEWIDTH = 5
+                    LINES = 6
+                    TRIANGLES = 7
+                    CYLINDER = 22
+                    CONE = 23
+                cgo = CGO()
+            
+            # Calculate per-atom weighted vectors
+            atom_vectors = self.calculate_per_atom_vectors(peaks_df)
+            
+            if not atom_vectors:
+                return
+            
+            vector_obj = f"displacement_vectors_{threshold_value}_{threshold_type}"
+            scale_factor = self.vector_scale_spin.value()
+            
+            # Create CGO arrow objects for each atom
+            all_cgo_objects = []
+            
+            for atom_key, vector_data in atom_vectors.items():
+                atom_pos = vector_data['atom_pos']
+                avg_vector = vector_data['avg_vector']
+                
+                # Calculate end position
+                end_pos = [
+                    atom_pos[0] + avg_vector[0] * scale_factor,
+                    atom_pos[1] + avg_vector[1] * scale_factor,
+                    atom_pos[2] + avg_vector[2] * scale_factor
+                ]
+                
+                # Only show significant vectors
+                magnitude = np.linalg.norm(avg_vector)
+                if magnitude < 0.1:
+                    continue
+                
+                # Create CGO arrow
+                arrow_cgo = self.create_cgo_arrow(atom_pos, end_pos, magnitude)
+                all_cgo_objects.extend(arrow_cgo)
+            
+            # Load all CGO objects as a single object
+            if all_cgo_objects:
+                try:
+                    cmd.load_cgo(all_cgo_objects, vector_obj)
+                    print(f"Created CGO displacement vectors: {vector_obj}")
+                except NameError:
+                    # PyMOL not available, just print what would be created
+                    print(f"Would create CGO object '{vector_obj}' with {len(all_cgo_objects)} elements")
+            
+        except Exception as e:
+            print(f"Error creating CGO displacement vectors: {e}")
+            # Fallback to the original pseudoatom method
+            self.create_displacement_vectors(peaks_df, [], threshold_value, threshold_type)
+
+    def create_cgo_arrow(self, start_pos, end_pos, magnitude):
+        """Create a CGO arrow from start to end position"""
+        try:
+            # Import CGO constants
+            try:
+                from pymol import cgo
+            except ImportError:
+                # Define CGO constants if PyMOL is not available
+                class CGO:
+                    BEGIN = 0
+                    END = 1
+                    VERTEX = 2
+                    NORMAL = 3
+                    COLOR = 4
+                    LINEWIDTH = 5
+                    LINES = 6
+                    TRIANGLES = 7
+                    CYLINDER = 22
+                    CONE = 23
+                cgo = CGO()
+            
+            arrow_objects = []
+            
+            # Calculate arrow properties
+            arrow_vector = np.array(end_pos) - np.array(start_pos)
+            arrow_length = np.linalg.norm(arrow_vector)
+            
+            if arrow_length < 1e-6:
+                return []
+            
+            # Normalize vector for direction
+            arrow_direction = arrow_vector / arrow_length
+            
+            # Calculate shaft end (90% of total length)
+            shaft_length = arrow_length * 0.9
+            shaft_end = np.array(start_pos) + arrow_direction * shaft_length
+            
+            # Color based on magnitude and direction
+            if np.sum(arrow_vector) > 0:
+                color = [1.0, 0.65, 0.0]  # Orange
+            else:
+                color = [0.0, 1.0, 1.0]  # Cyan
+            
+            # Cylinder shaft
+            shaft_radius = min(0.05, arrow_length * 0.02)
+            arrow_objects.extend([
+                cgo.CYLINDER,
+                start_pos[0], start_pos[1], start_pos[2],
+                shaft_end[0], shaft_end[1], shaft_end[2],
+                shaft_radius,
+                color[0], color[1], color[2],
+                color[0], color[1], color[2]
+            ])
+            
+            # Cone arrowhead
+            head_radius = shaft_radius * 2.5
+            arrow_objects.extend([
+                cgo.CONE,
+                shaft_end[0], shaft_end[1], shaft_end[2],
+                end_pos[0], end_pos[1], end_pos[2],
+                head_radius, 0.0,
+                color[0], color[1], color[2],
+                color[0], color[1], color[2],
+                1.0, 1.0
+            ])
+            
+            return arrow_objects
+            
+        except Exception as e:
+            print(f"Error creating CGO arrow: {e}")
+            return []
 
     def create_displacement_vectors(self, peaks_df, model_objects, threshold_value, threshold_type):
         """Create per-atom displacement vectors based on weighted peak directions"""
@@ -591,8 +838,37 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             print(f"Error generating vector analytics: {e}")
             return None
 
-    def create_symmetry_equivalent_models(self, base_obj, peaks_df, pdb_file):
-        """Create symmetry-equivalent models based on the transformations in peaks_df"""
+    def map_symmetry_features_to_model(self, base_obj, peaks_df, pdb_file):
+        """Map symmetry-equivalent peaks and arrows back to original model coordinate space"""
+        try:
+            # Read the structure to get unit cell information
+            import gemmi
+            structure = gemmi.read_structure(pdb_file)
+            
+            # Extract unique symmetry operations from the peaks data using image_idx
+            transformations = self.extract_symmetry_transformations(peaks_df, structure)
+            
+            # Validate the transformation matrices
+            if transformations:
+                validation_success = self.validate_symmetry_conversion(structure, transformations)
+                if not validation_success:
+                    print("Warning: Some transformation matrices failed validation")
+                    # Fallback to creating multiple models if inverse mapping fails
+                    return self.create_symmetry_equivalent_models_fallback(base_obj, peaks_df, pdb_file)
+            
+            # Instead of creating multiple models, map all symmetry features to original space
+            mapped_peaks_df = self.apply_inverse_transformations_to_peaks(peaks_df, transformations, structure)
+            
+            print(f"Mapped {len(mapped_peaks_df)} symmetry-equivalent features to original model space")
+            return mapped_peaks_df
+            
+        except Exception as e:
+            print(f"Error mapping symmetry features: {e}")
+            # Fallback to the original multiple-model method
+            return self.create_symmetry_equivalent_models_fallback(base_obj, peaks_df, pdb_file)
+
+    def create_symmetry_equivalent_models_fallback(self, base_obj, peaks_df, pdb_file):
+        """Fallback: Create symmetry-equivalent models using the original approach"""
         try:
             # Read the structure to get unit cell information
             import gemmi
@@ -740,6 +1016,70 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             import traceback
             traceback.print_exc()
             return []
+
+    def apply_inverse_transformations_to_peaks(self, peaks_df, transformations, structure):
+        """Apply inverse transformations to map peaks from symmetry space back to original model space"""
+        try:
+            print("Applying inverse transformations to map symmetry features to original model space...")
+            
+            # Check if we have the required columns
+            if 'image_idx' not in peaks_df.columns:
+                print("Warning: image_idx column not found, returning original peaks")
+                return peaks_df
+            
+            # Create a copy of the DataFrame to modify
+            mapped_peaks_df = peaks_df.copy()
+            
+            # Get space group operations for inverse calculation
+            sg = gemmi.SpaceGroup(structure.spacegroup_hm)
+            operations = list(sg.operations())
+            
+            # Process each peak and map it back to original coordinate space
+            for idx, row in mapped_peaks_df.iterrows():
+                image_idx = int(row['image_idx'])
+                
+                # Skip identity transformation (image_idx = 0)
+                if image_idx == 0:
+                    continue
+                
+                if image_idx >= len(transformations):
+                    continue
+                
+                # Get the forward transformation matrix and compute its inverse
+                transform_flat = transformations[image_idx]
+                transform_4x4 = np.array(transform_flat).reshape(4, 4)
+                inverse_transform = np.linalg.inv(transform_4x4)
+                
+                # Transform peak coordinates from symmetry space to original space
+                peak_coords = np.array([row['peakx'], row['peaky'], row['peakz'], 1.0])
+                transformed_peak = inverse_transform @ peak_coords
+                
+                # Transform mark coordinates (start of displacement vectors)
+                mark_coords = np.array([row['markx'], row['marky'], row['markz'], 1.0])
+                transformed_mark = inverse_transform @ mark_coords
+                
+                # Update the DataFrame with transformed coordinates
+                mapped_peaks_df.at[idx, 'peakx'] = transformed_peak[0]
+                mapped_peaks_df.at[idx, 'peaky'] = transformed_peak[1]
+                mapped_peaks_df.at[idx, 'peakz'] = transformed_peak[2]
+                
+                mapped_peaks_df.at[idx, 'markx'] = transformed_mark[0]
+                mapped_peaks_df.at[idx, 'marky'] = transformed_mark[1]
+                mapped_peaks_df.at[idx, 'markz'] = transformed_mark[2]
+                
+                # Recalculate displacement vectors in original space
+                mapped_peaks_df.at[idx, 'deltax'] = transformed_peak[0] - transformed_mark[0]
+                mapped_peaks_df.at[idx, 'deltay'] = transformed_peak[1] - transformed_mark[1]
+                mapped_peaks_df.at[idx, 'deltaz'] = transformed_peak[2] - transformed_mark[2]
+            
+            print(f"Successfully mapped {len(mapped_peaks_df)} peaks to original coordinate space")
+            return mapped_peaks_df
+            
+        except Exception as e:
+            print(f"Error applying inverse transformations: {e}")
+            import traceback
+            traceback.print_exc()
+            return peaks_df  # Return original if transformation fails
     
     def validate_transformation_matrix(self, transform_4x4, gemmi_op, structure):
         """Validate that our transformation matrix produces correct results"""
