@@ -607,8 +607,9 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
                 validation_success = self.validate_symmetry_conversion(structure, transformations)
                 if not validation_success:
                     print("Warning: Some transformation matrices failed validation")
-                    # Option to fallback to PyMOL's symexp if validation fails
-                    print("Consider using PyMOL's native symexp command as fallback")
+                    # Fallback to PyMOL's symexp if validation fails
+                    print("Attempting fallback to PyMOL's native symexp command...")
+                    return self.create_symmetry_with_symexp_fallback(base_obj, structure)
             
             sym_objects = []
             
@@ -640,6 +641,36 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             print(f"Error creating symmetry models: {e}")
             # Fallback to the pseudoatom method
             return self.create_symmetry_pseudoatoms(peaks_df, base_obj)
+
+    def create_symmetry_with_symexp_fallback(self, base_obj, structure):
+        """Fallback method using PyMOL's native symexp command"""
+        try:
+            print("Using PyMOL's native symexp command as fallback...")
+            
+            # Generate PyMOL symexp command
+            sg_name = structure.spacegroup_hm.replace(' ', '')
+            cell = structure.cell
+            cell_params = f"{cell.a:.3f},{cell.b:.3f},{cell.c:.3f},{cell.alpha:.1f},{cell.beta:.1f},{cell.gamma:.1f}"
+            
+            # Create symmetry objects using PyMOL's symexp
+            symexp_obj = f"{base_obj}_symexp"
+            
+            print(f"Executing: symexp {symexp_obj}, {base_obj}, '{sg_name}', ({cell_params})")
+            
+            # Try to use PyMOL's symexp command
+            try:
+                cmd.symexp(symexp_obj, base_obj, sg_name, f"({cell_params})")
+                print("✓ PyMOL symexp fallback successful")
+                return [symexp_obj]
+            except Exception as symexp_error:
+                print(f"PyMOL symexp fallback failed: {symexp_error}")
+                print("Note: symexp might not be available in this PyMOL version")
+                print("Recommendation: Use a recent version of PyMOL with symexp support")
+                return []
+                
+        except Exception as e:
+            print(f"Error in symexp fallback: {e}")
+            return []
     
     def extract_symmetry_transformations(self, peaks_df, structure):
         """Extract crystallographic transformations from image_idx values using proper symmetry operations"""
