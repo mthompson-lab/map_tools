@@ -602,6 +602,15 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             # This uses proper crystallographic symmetry operations instead of coord->mark mappings
             transformations = self.extract_symmetry_transformations(peaks_df, structure)
             
+            # Validate the transformation matrices
+            if transformations:
+                validation_success = self.validate_symmetry_conversion(structure, transformations)
+                if not validation_success:
+                    print("Warning: Some transformation matrices failed validation")
+                    # Fallback to PyMOL's symexp if validation fails
+                    print("Attempting fallback to PyMOL's native symexp command...")
+                    return self.create_symmetry_with_symexp_fallback(base_obj, structure)
+            
             sym_objects = []
             
             for i, transform in enumerate(transformations):
@@ -632,6 +641,36 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             print(f"Error creating symmetry models: {e}")
             # Fallback to the pseudoatom method
             return self.create_symmetry_pseudoatoms(peaks_df, base_obj)
+
+    def create_symmetry_with_symexp_fallback(self, base_obj, structure):
+        """Fallback method using PyMOL's native symexp command"""
+        try:
+            print("Using PyMOL's native symexp command as fallback...")
+            
+            # Generate PyMOL symexp command
+            sg_name = structure.spacegroup_hm.replace(' ', '')
+            cell = structure.cell
+            cell_params = f"{cell.a:.3f},{cell.b:.3f},{cell.c:.3f},{cell.alpha:.1f},{cell.beta:.1f},{cell.gamma:.1f}"
+            
+            # Create symmetry objects using PyMOL's symexp
+            symexp_obj = f"{base_obj}_symexp"
+            
+            print(f"Executing: symexp {symexp_obj}, {base_obj}, '{sg_name}', ({cell_params})")
+            
+            # Try to use PyMOL's symexp command
+            try:
+                cmd.symexp(symexp_obj, base_obj, sg_name, f"({cell_params})")
+                print("✓ PyMOL symexp fallback successful")
+                return [symexp_obj]
+            except Exception as symexp_error:
+                print(f"PyMOL symexp fallback failed: {symexp_error}")
+                print("Note: symexp might not be available in this PyMOL version")
+                print("Recommendation: Use a recent version of PyMOL with symexp support")
+                return []
+                
+        except Exception as e:
+            print(f"Error in symexp fallback: {e}")
+            return []
     
     def extract_symmetry_transformations(self, peaks_df, structure):
         """Extract crystallographic transformations from image_idx values using proper symmetry operations"""
@@ -667,19 +706,31 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
                 
                 # Convert gemmi's 24-based rotation and translation to proper matrices
                 rot_matrix = np.array(op.rot) / 24.0  # gemmi uses 24-based system
-                trans_vector = np.array(op.tran) / 24.0  # same for translation
+                trans_vector_frac = np.array(op.tran) / 24.0  # fractional translation
+                
+                # CRITICAL FIX: Convert fractional translations to Cartesian for PyMOL
+                # PyMOL expects transformation matrices with Cartesian translations in Angstroms
+                cell = structure.cell
+                trans_vector_cart = trans_vector_frac * np.array([cell.a, cell.b, cell.c])
                 
                 # Create 4x4 transformation matrix for PyMOL
                 transform_4x4 = np.eye(4)
                 transform_4x4[:3, :3] = rot_matrix
-                transform_4x4[:3, 3] = trans_vector
+                transform_4x4[:3, 3] = trans_vector_cart  # Use Cartesian translations
                 
                 # Convert to PyMOL format (flattened 16-element list)
                 flat_matrix = transform_4x4.flatten().tolist()
                 pymol_transforms.append(flat_matrix)
                 
                 print(f"Image_idx {image_idx}: Rotation\n{rot_matrix}")
-                print(f"Image_idx {image_idx}: Translation {trans_vector}")
+                print(f"Image_idx {image_idx}: Translation (fractional) {trans_vector_frac}")
+                print(f"Image_idx {image_idx}: Translation (Cartesian) {trans_vector_cart}")
+                
+                # Validate the transformation matrix
+                if self.validate_transformation_matrix(transform_4x4, op, structure):
+                    print(f"✓ Transformation matrix for image_idx {image_idx} validated")
+                else:
+                    print(f"✗ Transformation matrix for image_idx {image_idx} validation failed")
             
             print(f"Generated {len(pymol_transforms)} crystallographic transformation matrices")
             return pymol_transforms
@@ -689,6 +740,104 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             import traceback
             traceback.print_exc()
             return []
+    
+    def validate_transformation_matrix(self, transform_4x4, gemmi_op, structure):
+        """Validate that our transformation matrix produces correct results"""
+        try:
+            # Get a test coordinate from the structure
+            model = structure[0]
+            test_atom = None
+            for chain in model:
+                for residue in chain:
+                    for atom in residue:
+                        test_atom = atom
+                        break
+                    if test_atom:
+                        break
+                if test_atom:
+                    break
+            
+            if not test_atom:
+                return False
+            
+            # Test coordinate
+            orig_pos = np.array([test_atom.pos.x, test_atom.pos.y, test_atom.pos.z])
+            
+            # Method 1: Apply our PyMOL matrix to Cartesian coordinates
+            cart_homogeneous = np.array([orig_pos[0], orig_pos[1], orig_pos[2], 1.0])
+            result_pymol = transform_4x4 @ cart_homogeneous
+            
+            # Method 2: Use Gemmi's crystallographic transformation
+            cell = structure.cell
+            frac_coord = cell.fractionalize(gemmi.Position(*orig_pos))
+            frac_pos = np.array([frac_coord.x, frac_coord.y, frac_coord.z])
+            transformed_frac = gemmi_op.apply_to_xyz(frac_pos.tolist())
+            result_gemmi = cell.orthogonalize(gemmi.Fractional(*transformed_frac))
+            result_gemmi_array = np.array([result_gemmi.x, result_gemmi.y, result_gemmi.z])
+            
+            # Compare results
+            diff = np.linalg.norm(result_pymol[:3] - result_gemmi_array)
+            tolerance = 1e-6
+            
+            if diff > tolerance:
+                print(f"Validation failed: difference = {diff:.9f} > {tolerance}")
+                print(f"  PyMOL result: {result_pymol[:3]}")
+                print(f"  Gemmi result: {result_gemmi_array}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error during validation: {e}")
+            return False
+
+    def validate_symmetry_conversion(self, structure, transformations):
+        """Validate symmetry conversion using PyMOL's symexp-like approach"""
+        try:
+            print("\n" + "="*50)
+            print("VALIDATING SYMMETRY CONVERSION")
+            print("="*50)
+            
+            # This method would use PyMOL's symexp command in a real PyMOL environment
+            # For now, we simulate the validation by comparing with Gemmi's built-in methods
+            
+            print("Note: In a PyMOL environment, this would execute:")
+            sg_name = structure.spacegroup_hm.replace(' ', '')
+            cell = structure.cell
+            cell_params = f"{cell.a:.3f},{cell.b:.3f},{cell.c:.3f},{cell.alpha:.1f},{cell.beta:.1f},{cell.gamma:.1f}"
+            print(f"symexp sym, structure, '{sg_name}', ({cell_params})")
+            
+            print(f"\nValidating {len(transformations)} transformation matrices...")
+            
+            # Get space group operations for comparison
+            sg = gemmi.SpaceGroup(structure.spacegroup_hm)
+            operations = list(sg.operations())
+            
+            if len(transformations) != len(operations):
+                print(f"Warning: Number of transformations ({len(transformations)}) != number of operations ({len(operations)})")
+            
+            validation_results = []
+            for i, transform in enumerate(transformations):
+                if i < len(operations):
+                    # Reshape flattened matrix back to 4x4
+                    transform_4x4 = np.array(transform).reshape(4, 4)
+                    is_valid = self.validate_transformation_matrix(transform_4x4, operations[i], structure)
+                    validation_results.append(is_valid)
+                    print(f"Transformation {i}: {'✓ Valid' if is_valid else '✗ Invalid'}")
+                else:
+                    validation_results.append(False)
+                    print(f"Transformation {i}: ✗ No corresponding operation")
+            
+            all_valid = all(validation_results)
+            print(f"\nOverall validation: {'✓ All matrices valid' if all_valid else '✗ Some matrices invalid'}")
+            
+            return all_valid
+            
+        except Exception as e:
+            print(f"Error during symmetry validation: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def generate_vector_analytics(self, peaks_df):
         """Generate analytics for displacement vectors"""
