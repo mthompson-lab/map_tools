@@ -431,9 +431,26 @@ class IADDATPlugin(QtWidgets.QDialog):
         """Calculate weighted average displacement vectors per atom using symmetry-corrected coordinates"""
         atom_vectors = {}
         
+        # Validate required columns exist
+        required_columns = ['coordx', 'coordy', 'coordz', 'chain', 'seqid', 'residue', 'atom', 'altloc', 
+                           'peakx', 'peaky', 'peakz', 'markx', 'marky', 'markz', 'peak']
+        missing_columns = [col for col in required_columns if col not in peaks_df.columns]
+        
+        if missing_columns:
+            print(f"Error: Missing required columns for vector calculation: {missing_columns}")
+            return {}
+        
+        if peaks_df.empty:
+            print("Warning: Empty peaks DataFrame, no vectors to calculate")
+            return {}
+        
         # Group by the original atom coordinates (coordx, coordy, coordz)
         # but use mark coordinates for vector calculations
-        grouped = peaks_df.groupby(['coordx', 'coordy', 'coordz', 'chain', 'seqid', 'residue', 'atom', 'altloc'])
+        try:
+            grouped = peaks_df.groupby(['coordx', 'coordy', 'coordz', 'chain', 'seqid', 'residue', 'atom', 'altloc'])
+        except KeyError as e:
+            print(f"Error: Cannot group by required columns: {e}")
+            return {}
         
         for (coord_x, coord_y, coord_z, chain, seqid, residue, atom, altloc), group in grouped:
             # Create unique atom identifier
@@ -669,58 +686,15 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             print(f"Error extracting transformations: {e}")
             return []
     
-    def display_analytics_summary(self, analytics):
-        """Display a summary of vector analytics"""
+    def generate_vector_analytics(self, peaks_df):
+        """Generate analytics for displacement vectors"""
         try:
-            print("Displaying analytics summary...")
-            summary = analytics['summary']
+            # First, calculate per-atom vectors
+            atom_vectors = self.calculate_per_atom_vectors(peaks_df)
             
-            summary_text = f"""Vector Analysis Summary:
-
-Total atoms with vectors: {analytics['total_atoms']}
-Mean displacement magnitude: {summary['mean_magnitude']:.3f} Å
-Standard deviation: {summary['std_magnitude']:.3f} Å
-Maximum displacement: {summary['max_magnitude']:.3f} Å
-Minimum displacement: {summary['min_magnitude']:.3f} Å
-Total displacement: {summary['total_displacement']:.3f} Å
-
-Chain analysis:"""
-            
-            for chain, data in analytics['chain_analysis'].items():
-                chain_mags = np.array(data['magnitudes'])
-                summary_text += f"""
-Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(chain_mags):.3f} Å"""
-            
-            # Show the analytics dialog
-            msg_box = QtWidgets.QMessageBox(self)
-            msg_box.setWindowTitle("Vector Analytics")
-            msg_box.setText(summary_text)
-            msg_box.setIcon(QtWidgets.QMessageBox.Information)
-            msg_box.exec_()
-            
-            print("Analytics summary displayed successfully")
-            
-        except Exception as e:
-            print(f"Error displaying analytics summary: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def create_symmetry_pseudoatoms(self, peaks_df, base_obj):
-        """Fallback method: create pseudoatoms at symmetry positions"""
-        try:
-            sym_obj = f"{base_obj}_sym_marks"
-            unique_marks = peaks_df[['markx', 'marky', 'markz', 'chain', 'seqid', 'residue', 'atom']].drop_duplicates()
-            
-            for _, mark in unique_marks.iterrows():
-                atom_name = f"{mark['chain']}_{mark['seqid']}_{mark['residue']}_{mark['atom']}"
-                cmd.pseudoatom(sym_obj, name=atom_name, pos=[mark['markx'], mark['marky'], mark['markz']], vdw=0.8)
-            
-            cmd.hide("everything", sym_obj)
-            return [sym_obj]
-            
-        except Exception as e:
-            print(f"Error creating symmetry pseudoatoms: {e}")
-            return []
+            if not atom_vectors:
+                print("Warning: No atom vectors calculated")
+                return None
             
             analytics = {
                 'total_atoms': len(atom_vectors),
@@ -779,7 +753,38 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             
         except Exception as e:
             print(f"Error generating vector analytics: {e}")
+            import traceback
+            traceback.print_exc()
             return None
+
+    def create_symmetry_pseudoatoms(self, peaks_df, base_obj):
+        """Fallback method: create pseudoatoms at symmetry positions"""
+        try:
+            # Validate required columns exist
+            required_columns = ['markx', 'marky', 'markz', 'chain', 'seqid', 'residue', 'atom']
+            missing_columns = [col for col in required_columns if col not in peaks_df.columns]
+            
+            if missing_columns:
+                print(f"Error: Missing required columns for symmetry pseudoatoms: {missing_columns}")
+                return []
+            
+            if peaks_df.empty:
+                print("Warning: Empty peaks DataFrame, no symmetry marks to create")
+                return []
+            
+            sym_obj = f"{base_obj}_sym_marks"
+            unique_marks = peaks_df[['markx', 'marky', 'markz', 'chain', 'seqid', 'residue', 'atom']].drop_duplicates()
+            
+            for _, mark in unique_marks.iterrows():
+                atom_name = f"{mark['chain']}_{mark['seqid']}_{mark['residue']}_{mark['atom']}"
+                cmd.pseudoatom(sym_obj, name=atom_name, pos=[mark['markx'], mark['marky'], mark['markz']], vdw=0.8)
+            
+            cmd.hide("everything", sym_obj)
+            return [sym_obj]
+            
+        except Exception as e:
+            print(f"Error creating symmetry pseudoatoms: {e}")
+            return []
 
 # Import the original IADDAT functions with bug fixes
 def map_threshold(realmap, threshold, cell, negative=False):
@@ -868,11 +873,54 @@ def IADDAT_peaks_table(input_PDB_filename, input_MTZ_filename, input_column_labe
             }
             peaks.append(record)
     
-    return pd.DataFrame.from_records(peaks)
+    # Create DataFrame and validate it has expected columns
+    df = pd.DataFrame.from_records(peaks)
+    
+    # Debug output
+    print(f"Debug: Created peaks DataFrame with {len(df)} rows and columns: {list(df.columns)}")
+    
+    # If no peaks found, create empty DataFrame with required columns
+    if df.empty:
+        print("Warning: No peaks found within distance cutoff")
+        required_columns = ["chain", "seqid", "residue", "atom", "altloc", "dist", "peak", 
+                           "coordx", "coordy", "coordz", "peakx", "peaky", "peakz", 
+                           "markx", "marky", "markz", "mol_COM", "deltax", "deltay", "deltaz"]
+        df = pd.DataFrame(columns=required_columns)
+    
+    return df
 
 def IADDAT_integrator(IADDAT_peaks_df, input_PDB_filename, input_MTZ_filename, 
                      threshold_value=3.0, threshold_type="sigma", distance_cutoff=1.2):
     """Integrate IADDAT values and save results."""
+    
+    # Validate DataFrame and add debugging
+    print(f"Debug: IADDAT_peaks_df shape: {IADDAT_peaks_df.shape}")
+    print(f"Debug: IADDAT_peaks_df columns: {list(IADDAT_peaks_df.columns)}")
+    
+    # Check for required columns
+    required_columns = ['coordx', 'coordy', 'coordz', 'peak']
+    missing_columns = [col for col in required_columns if col not in IADDAT_peaks_df.columns]
+    
+    if missing_columns:
+        raise KeyError(f"Missing required columns in DataFrame: {missing_columns}. Available columns: {list(IADDAT_peaks_df.columns)}")
+    
+    if IADDAT_peaks_df.empty:
+        print("Warning: IADDAT_peaks_df is empty. No peaks found.")
+        # Create empty output files with warning
+        pdb_string = os.path.basename(input_PDB_filename).replace('.pdb', '')
+        mtz_string = os.path.basename(input_MTZ_filename).replace('.mtz', '')
+        output_pdb_string = f"{pdb_string}_{mtz_string}_total-IADDAT-in-B-iso-{threshold_value}-{threshold_type}_within-{distance_cutoff}-angstroms.pdb"
+        df_excel_string = f"{pdb_string}_{mtz_string}_IADDAT-table-{threshold_value}-{threshold_type}_within-{distance_cutoff}-angstroms.xlsx"
+        
+        # Write original PDB without modifications
+        input_PDB = gemmi.read_structure(input_PDB_filename)
+        input_PDB.write_minimal_pdb(output_pdb_string)
+        
+        # Create empty IADDAT DataFrame
+        empty_df = pd.DataFrame(columns=["chain", "residue_number", "residue_name", "atom_name", "atom_altloc", "IADDAT"])
+        empty_df.to_excel(df_excel_string)
+        return
+    
     pdb_string = os.path.basename(input_PDB_filename).replace('.pdb', '')
     mtz_string = os.path.basename(input_MTZ_filename).replace('.mtz', '')
     output_pdb_string = f"{pdb_string}_{mtz_string}_total-IADDAT-in-B-iso-{threshold_value}-{threshold_type}_within-{distance_cutoff}-angstroms.pdb"
@@ -888,26 +936,37 @@ def IADDAT_integrator(IADDAT_peaks_df, input_PDB_filename, input_MTZ_filename,
         for residue in chain:
             per_resi_IADDAT = []
             for atom in residue:
-                # Fixed: Use proper column names and handle floating point comparison
-                coord_x = atom.pos.x
-                coord_y = atom.pos.y
-                coord_z = atom.pos.z
-                
-                # Use a tolerance for floating point comparison
-                tolerance = 0.001
-                peaks = IADDAT_peaks_df[
-                    (abs(IADDAT_peaks_df['coordx'] - coord_x) < tolerance) &
-                    (abs(IADDAT_peaks_df['coordy'] - coord_y) < tolerance) &
-                    (abs(IADDAT_peaks_df['coordz'] - coord_z) < tolerance)
-                ]
-                
-                unique = np.unique(peaks['peak'].values) if not peaks.empty else np.array([])
-                total_IADDAT = np.abs(unique).sum()
-                per_resi_IADDAT.append(total_IADDAT)
-                atom.b_iso = total_IADDAT
-                
-                altloc = atom.altloc if atom.has_altloc() else "None"
-                IADDAT.append([chain.name, str(residue.seqid), residue.name, atom.name, altloc, total_IADDAT])
+                try:
+                    # Fixed: Use proper column names and handle floating point comparison
+                    coord_x = atom.pos.x
+                    coord_y = atom.pos.y
+                    coord_z = atom.pos.z
+                    
+                    # Use a tolerance for floating point comparison
+                    tolerance = 0.001
+                    peaks = IADDAT_peaks_df[
+                        (abs(IADDAT_peaks_df['coordx'] - coord_x) < tolerance) &
+                        (abs(IADDAT_peaks_df['coordy'] - coord_y) < tolerance) &
+                        (abs(IADDAT_peaks_df['coordz'] - coord_z) < tolerance)
+                    ]
+                    
+                    unique = np.unique(peaks['peak'].values) if not peaks.empty else np.array([])
+                    total_IADDAT = np.abs(unique).sum()
+                    per_resi_IADDAT.append(total_IADDAT)
+                    atom.b_iso = total_IADDAT
+                    
+                    altloc = atom.altloc if atom.has_altloc() else "None"
+                    IADDAT.append([chain.name, str(residue.seqid), residue.name, atom.name, altloc, total_IADDAT])
+                    
+                except Exception as e:
+                    print(f"Warning: Error processing atom {chain.name}:{residue.seqid}:{residue.name}:{atom.name} - {e}")
+                    # Set default values for problematic atoms
+                    total_IADDAT = 0.0
+                    per_resi_IADDAT.append(total_IADDAT)
+                    atom.b_iso = total_IADDAT
+                    
+                    altloc = atom.altloc if atom.has_altloc() else "None"
+                    IADDAT.append([chain.name, str(residue.seqid), residue.name, atom.name, altloc, total_IADDAT])
             
             per_resi_avg_IADDAT = np.array(per_resi_IADDAT).mean() if per_resi_IADDAT else 0.0
             for atom in residue:

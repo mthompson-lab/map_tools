@@ -1,2 +1,3 @@
 *.ipynb
 *coot*
+__pycache__/
