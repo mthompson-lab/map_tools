@@ -883,7 +883,7 @@ def IADDAT_peaks_table(input_PDB_filename, input_MTZ_filename, input_column_labe
         raise ValueError(f"Error: please provide column labels corresponding to structure factors and phases; eg: 'FoFo,PHFc'\nColumns in file: {input_MTZ.column_labels()}")
     
     sf = mtz_fphi.transform_f_phi_to_map(sample_rate=4)
-    # Use full unit cell map instead of ASU-masked map to find peaks throughout the cell
+    # Use full unit cell map instead of ASU-masked (Asymmetric Unit) map to find peaks throughout the cell
     realmap = np.array(sf, copy=False)
     
     if threshold_type == "sigma":
