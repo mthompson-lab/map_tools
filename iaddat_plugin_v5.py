@@ -282,7 +282,7 @@ class IADDATPlugin(QtWidgets.QDialog):
             self.progress.setVisible(False)
     
     def load_results_to_pymol(self, pdb_file, mtz_file, peaks_df, threshold_value, threshold_type, distance_cutoff):
-        """Load results into PyMOL for visualization using new single-model approach"""
+        """Load results into PyMOL for visualization anchored to the model"""
         try:
             # Generate output filenames (matching the original script logic)
             pdb_string = os.path.basename(pdb_file).replace('.pdb', '')
@@ -297,27 +297,24 @@ class IADDATPlugin(QtWidgets.QDialog):
                 except NameError:
                     print(f"Would load PDB file: {output_pdb} as object: {obj_name}")
                 
-                # NEW APPROACH: Map symmetry features to original model instead of creating copies
-                mapped_peaks_df = self.map_symmetry_features_to_model(obj_name, peaks_df, pdb_file)
-                
                 if self.color_by_iaddat_check.isChecked():
-                    # Color by B-factor (which contains IADDAT values) for the single model
+                    # Color by B-factor (which contains IADDAT values)
                     try:
                         cmd.spectrum("b", "blue_white_red", obj_name)
                         cmd.show("sticks", obj_name)
                     except NameError:
                         print(f"Would color {obj_name} by B-factor")
                 
-                # Show density peaks as spheres if requested (using mapped coordinates)
-                if self.show_peaks_check.isChecked() and not mapped_peaks_df.empty:
+                # Show density peaks as spheres if requested (anchored to model)
+                if self.show_peaks_check.isChecked() and not peaks_df.empty:
                     if self.carve_peaks_check.isChecked():
-                        self.create_carved_peak_objects_single_model(mapped_peaks_df, obj_name, threshold_value, threshold_type, distance_cutoff)
+                        self.create_carved_peak_objects_single_model(peaks_df, obj_name, threshold_value, threshold_type, distance_cutoff)
                     else:
-                        self.create_peak_objects_single_model(mapped_peaks_df, threshold_value, threshold_type)
+                        self.create_peak_objects_single_model(peaks_df, threshold_value, threshold_type)
                 
-                # Show displacement vectors if requested (using CGO arrows)
-                if self.show_vectors_check.isChecked() and not mapped_peaks_df.empty:
-                    self.create_displacement_vectors_with_cgo(mapped_peaks_df, threshold_value, threshold_type)
+                # Show displacement vectors if requested (using CGO arrows anchored to model)
+                if self.show_vectors_check.isChecked() and not peaks_df.empty:
+                    self.create_displacement_vectors_with_cgo(peaks_df, threshold_value, threshold_type)
                 
                 # Center view on the structure
                 try:
@@ -326,27 +323,31 @@ class IADDATPlugin(QtWidgets.QDialog):
                 except NameError:
                     print(f"Would center and zoom on {obj_name}")
                 
-                self.update_status("Results loaded into PyMOL with new single-model approach", "green")
+                self.update_status("Results loaded into PyMOL", "green")
             
         except Exception as e:
             self.update_status(f"Error loading to PyMOL: {str(e)}", "red")
 
-    def create_peak_objects_single_model(self, mapped_peaks_df, threshold_value, threshold_type):
-        """Create PyMOL objects for mapped density peaks on single model"""
+    def create_peak_objects_single_model(self, peaks_df, threshold_value, threshold_type):
+        """Create PyMOL objects for density peaks relative to model atoms"""
         try:
-            # Create positive and negative peak objects using mapped coordinates
-            pos_peaks = mapped_peaks_df[mapped_peaks_df['peak'] > 0]
-            neg_peaks = mapped_peaks_df[mapped_peaks_df['peak'] < 0]
+            # Create positive and negative peak objects
+            pos_peaks = peaks_df[peaks_df['peak'] > 0]
+            neg_peaks = peaks_df[peaks_df['peak'] < 0]
             
             if not pos_peaks.empty:
-                # Create positive peaks (red spheres)
-                pos_obj = f"positive_peaks_mapped_{threshold_value}_{threshold_type}"
+                # Create positive peaks (red spheres) at coord + delta
+                pos_obj = f"positive_peaks_{threshold_value}_{threshold_type}"
                 for _, peak in pos_peaks.iterrows():
+                    # Peak position is original atom coord + delta
+                    peak_x = peak['coordx'] + peak['deltax']
+                    peak_y = peak['coordy'] + peak['deltay']
+                    peak_z = peak['coordz'] + peak['deltaz']
                     try:
-                        cmd.pseudoatom(pos_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                        cmd.pseudoatom(pos_obj, pos=[peak_x, peak_y, peak_z], 
                                      b=peak['peak'], vdw=0.3)
                     except NameError:
-                        print(f"Would create positive peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                        print(f"Would create positive peak at ({peak_x:.2f}, {peak_y:.2f}, {peak_z:.2f})")
                 
                 try:
                     cmd.color("red", pos_obj)
@@ -355,14 +356,18 @@ class IADDATPlugin(QtWidgets.QDialog):
                     print(f"Would color {pos_obj} red and show as spheres")
             
             if not neg_peaks.empty:
-                # Create negative peaks (blue spheres)
-                neg_obj = f"negative_peaks_mapped_{threshold_value}_{threshold_type}"
+                # Create negative peaks (blue spheres) at coord + delta
+                neg_obj = f"negative_peaks_{threshold_value}_{threshold_type}"
                 for _, peak in neg_peaks.iterrows():
+                    # Peak position is original atom coord + delta
+                    peak_x = peak['coordx'] + peak['deltax']
+                    peak_y = peak['coordy'] + peak['deltay']
+                    peak_z = peak['coordz'] + peak['deltaz']
                     try:
-                        cmd.pseudoatom(neg_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                        cmd.pseudoatom(neg_obj, pos=[peak_x, peak_y, peak_z], 
                                      b=abs(peak['peak']), vdw=0.3)
                     except NameError:
-                        print(f"Would create negative peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                        print(f"Would create negative peak at ({peak_x:.2f}, {peak_y:.2f}, {peak_z:.2f})")
                 
                 try:
                     cmd.color("blue", neg_obj)
@@ -371,30 +376,34 @@ class IADDATPlugin(QtWidgets.QDialog):
                     print(f"Would color {neg_obj} blue and show as spheres")
             
         except Exception as e:
-            print(f"Error creating mapped peak objects: {e}")
+            print(f"Error creating peak objects: {e}")
 
-    def create_carved_peak_objects_single_model(self, mapped_peaks_df, model_obj, threshold_value, threshold_type, distance_cutoff):
-        """Create PyMOL objects for mapped density peaks carved around the single model"""
+    def create_carved_peak_objects_single_model(self, peaks_df, model_obj, threshold_value, threshold_type, distance_cutoff):
+        """Create PyMOL objects for density peaks relative to model atoms, carved around the model"""
         try:
-            # Create positive and negative peak objects using mapped coordinates
-            pos_peaks = mapped_peaks_df[mapped_peaks_df['peak'] > 0]
-            neg_peaks = mapped_peaks_df[mapped_peaks_df['peak'] < 0]
+            # Create positive and negative peak objects
+            pos_peaks = peaks_df[peaks_df['peak'] > 0]
+            neg_peaks = peaks_df[peaks_df['peak'] < 0]
             
             if not pos_peaks.empty:
-                # Create positive peaks (red spheres)
-                pos_obj = f"positive_peaks_mapped_carved_{threshold_value}_{threshold_type}"
+                # Create positive peaks (red spheres) at coord + delta
+                pos_obj = f"positive_peaks_carved_{threshold_value}_{threshold_type}"
                 for _, peak in pos_peaks.iterrows():
+                    # Peak position is original atom coord + delta
+                    peak_x = peak['coordx'] + peak['deltax']
+                    peak_y = peak['coordy'] + peak['deltay']
+                    peak_z = peak['coordz'] + peak['deltaz']
                     try:
-                        cmd.pseudoatom(pos_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                        cmd.pseudoatom(pos_obj, pos=[peak_x, peak_y, peak_z], 
                                      b=peak['peak'], vdw=0.3)
                     except NameError:
-                        print(f"Would create carved positive peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                        print(f"Would create carved positive peak at ({peak_x:.2f}, {peak_y:.2f}, {peak_z:.2f})")
                 
                 try:
                     cmd.color("red", pos_obj)
                     cmd.show("spheres", pos_obj)
                     
-                    # Carve around the single model
+                    # Carve around the model
                     cmd.select(f"temp_sel_{pos_obj}", f"{pos_obj} within {distance_cutoff*1.5} of {model_obj}")
                     if cmd.count_atoms(f"temp_sel_{pos_obj}") > 0:
                         cmd.create(f"{pos_obj}_carved", f"temp_sel_{pos_obj}")
@@ -405,20 +414,24 @@ class IADDATPlugin(QtWidgets.QDialog):
                     print(f"Would carve {pos_obj} around {model_obj}")
             
             if not neg_peaks.empty:
-                # Create negative peaks (blue spheres)
-                neg_obj = f"negative_peaks_mapped_carved_{threshold_value}_{threshold_type}"
+                # Create negative peaks (blue spheres) at coord + delta
+                neg_obj = f"negative_peaks_carved_{threshold_value}_{threshold_type}"
                 for _, peak in neg_peaks.iterrows():
+                    # Peak position is original atom coord + delta
+                    peak_x = peak['coordx'] + peak['deltax']
+                    peak_y = peak['coordy'] + peak['deltay']
+                    peak_z = peak['coordz'] + peak['deltaz']
                     try:
-                        cmd.pseudoatom(neg_obj, pos=[peak['peakx'], peak['peaky'], peak['peakz']], 
+                        cmd.pseudoatom(neg_obj, pos=[peak_x, peak_y, peak_z], 
                                      b=abs(peak['peak']), vdw=0.3)
                     except NameError:
-                        print(f"Would create carved negative peak at ({peak['peakx']:.2f}, {peak['peaky']:.2f}, {peak['peakz']:.2f})")
+                        print(f"Would create carved negative peak at ({peak_x:.2f}, {peak_y:.2f}, {peak_z:.2f})")
                 
                 try:
                     cmd.color("blue", neg_obj)
                     cmd.show("spheres", neg_obj)
                     
-                    # Carve around the single model
+                    # Carve around the model
                     cmd.select(f"temp_sel_{neg_obj}", f"{neg_obj} within {distance_cutoff*1.5} of {model_obj}")
                     if cmd.count_atoms(f"temp_sel_{neg_obj}") > 0:
                         cmd.create(f"{neg_obj}_carved", f"temp_sel_{neg_obj}")
@@ -429,7 +442,7 @@ class IADDATPlugin(QtWidgets.QDialog):
                     print(f"Would carve {neg_obj} around {model_obj}")
             
         except Exception as e:
-            print(f"Error creating carved mapped peak objects: {e}")
+            print(f"Error creating carved peak objects: {e}")
     
     def create_carved_peak_objects(self, peaks_df, model_objects, threshold_value, threshold_type, distance_cutoff):
         """Create PyMOL objects for density peaks carved around all symmetry-equivalent models"""
@@ -714,11 +727,12 @@ class IADDATPlugin(QtWidgets.QDialog):
                 # Weight by peak height (including sign)
                 weight = peak['peak']  # This includes the sign
                 
-                # Calculate vector from mark position to peak position (symmetry-corrected)
+                # Calculate vector from original atom position to peak position
+                # This anchors the visualization to the model
                 vector = np.array([
-                    peak['peakx'] - peak['markx'],
-                    peak['peaky'] - peak['marky'], 
-                    peak['peakz'] - peak['markz']
+                    peak['peakx'] - coord_x,
+                    peak['peaky'] - coord_y, 
+                    peak['peakz'] - coord_z
                 ])
                 
                 weighted_vectors.append(weight * vector)
@@ -728,14 +742,11 @@ class IADDATPlugin(QtWidgets.QDialog):
                 # Average the weighted vectors
                 avg_vector = np.sum(weighted_vectors, axis=0) / len(weighted_vectors)
                 
-                # Use mark coordinates as the display position (symmetry-corrected)
-                # Take the first mark position as representative
-                first_row = group.iloc[0]
-                display_pos = [first_row['markx'], first_row['marky'], first_row['markz']]
+                # Use original atom coordinates as the display position (anchor to model)
+                display_pos = [coord_x, coord_y, coord_z]
                 
                 atom_vectors[atom_key] = {
-                    'atom_pos': display_pos,  # Use mark position for display
-                    'orig_atom_pos': [coord_x, coord_y, coord_z],  # Keep original for reference
+                    'atom_pos': display_pos,  # Use original atom position for display
                     'avg_vector': avg_vector,
                     'total_weight': total_weight,
                     'num_peaks': len(group)
@@ -838,447 +849,6 @@ Chain {chain}: {len(data['residues'])} residues, mean displacement: {np.mean(cha
             print(f"Error generating vector analytics: {e}")
             return None
 
-    def map_symmetry_features_to_model(self, base_obj, peaks_df, pdb_file):
-        """Map symmetry-equivalent peaks and arrows back to original model coordinate space"""
-        try:
-            # Read the structure to get unit cell information
-            import gemmi
-            structure = gemmi.read_structure(pdb_file)
-            
-            # Extract unique symmetry operations from the peaks data using image_idx
-            transformations = self.extract_symmetry_transformations(peaks_df, structure)
-            
-            # Validate the transformation matrices
-            if transformations:
-                validation_success = self.validate_symmetry_conversion(structure, transformations)
-                if not validation_success:
-                    print("Warning: Some transformation matrices failed validation")
-                    # Fallback to creating multiple models if inverse mapping fails
-                    return self.create_symmetry_equivalent_models_fallback(base_obj, peaks_df, pdb_file)
-            
-            # Instead of creating multiple models, map all symmetry features to original space
-            mapped_peaks_df = self.apply_inverse_transformations_to_peaks(peaks_df, transformations, structure)
-            
-            print(f"Mapped {len(mapped_peaks_df)} symmetry-equivalent features to original model space")
-            return mapped_peaks_df
-            
-        except Exception as e:
-            print(f"Error mapping symmetry features: {e}")
-            # Fallback to the original multiple-model method
-            return self.create_symmetry_equivalent_models_fallback(base_obj, peaks_df, pdb_file)
-
-    def create_symmetry_equivalent_models_fallback(self, base_obj, peaks_df, pdb_file):
-        """Fallback: Create symmetry-equivalent models using the original approach"""
-        try:
-            # Read the structure to get unit cell information
-            import gemmi
-            structure = gemmi.read_structure(pdb_file)
-            
-            # Extract unique symmetry operations from the peaks data using image_idx
-            # This uses proper crystallographic symmetry operations instead of coord->mark mappings
-            transformations = self.extract_symmetry_transformations(peaks_df, structure)
-            
-            # Validate the transformation matrices
-            if transformations:
-                validation_success = self.validate_symmetry_conversion(structure, transformations)
-                if not validation_success:
-                    print("Warning: Some transformation matrices failed validation")
-                    # Fallback to PyMOL's symexp if validation fails
-                    print("Attempting fallback to PyMOL's native symexp command...")
-                    return self.create_symmetry_with_symexp_fallback(base_obj, structure)
-            
-            sym_objects = []
-            
-            for i, transform in enumerate(transformations):
-                if i == 0:  # Skip identity transformation (original model)
-                    continue
-                    
-                sym_obj_name = f"{base_obj}_sym_{i}"
-                
-                # Copy the original structure
-                cmd.copy(sym_obj_name, base_obj)
-                
-                # Apply the transformation matrix
-                # PyMOL uses a 4x4 transformation matrix [rotation|translation]
-                #                                        [0 0 0     |1        ]
-                cmd.transform_selection(sym_obj_name, transform)
-                
-                sym_objects.append(sym_obj_name)
-            
-            # Group all symmetry-related objects
-            if sym_objects:
-                all_objects = [base_obj] + sym_objects
-                group_name = f"{base_obj}_symmetry_group"
-                cmd.group(group_name, " ".join(all_objects))
-            
-            return sym_objects
-            
-        except Exception as e:
-            print(f"Error creating symmetry models: {e}")
-            # Fallback to the pseudoatom method
-            return self.create_symmetry_pseudoatoms(peaks_df, base_obj)
-
-    def create_symmetry_with_symexp_fallback(self, base_obj, structure):
-        """Fallback method using PyMOL's native symexp command"""
-        try:
-            print("Using PyMOL's native symexp command as fallback...")
-            
-            # Generate PyMOL symexp command
-            sg_name = structure.spacegroup_hm.replace(' ', '')
-            cell = structure.cell
-            cell_params = f"{cell.a:.3f},{cell.b:.3f},{cell.c:.3f},{cell.alpha:.1f},{cell.beta:.1f},{cell.gamma:.1f}"
-            
-            # Create symmetry objects using PyMOL's symexp
-            symexp_obj = f"{base_obj}_symexp"
-            
-            print(f"Executing: symexp {symexp_obj}, {base_obj}, '{sg_name}', ({cell_params})")
-            
-            # Try to use PyMOL's symexp command
-            try:
-                cmd.symexp(symexp_obj, base_obj, sg_name, f"({cell_params})")
-                print("✓ PyMOL symexp fallback successful")
-                return [symexp_obj]
-            except Exception as symexp_error:
-                print(f"PyMOL symexp fallback failed: {symexp_error}")
-                print("Note: symexp might not be available in this PyMOL version")
-                print("Recommendation: Use a recent version of PyMOL with symexp support")
-                return []
-                
-        except Exception as e:
-            print(f"Error in symexp fallback: {e}")
-            return []
-    
-    def extract_symmetry_transformations(self, peaks_df, structure):
-        """Extract crystallographic transformations from image_idx values using proper symmetry operations"""
-        try:
-            # Check if image_idx column exists
-            if 'image_idx' not in peaks_df.columns:
-                print("Warning: image_idx column not found in peaks DataFrame. Cannot extract proper symmetry operations.")
-                return []
-            
-            # Get unique image_idx values from the peaks data
-            unique_image_indices = peaks_df['image_idx'].unique()
-            print(f"Found {len(unique_image_indices)} unique symmetry operations (image_idx values): {unique_image_indices}")
-            
-            # Get the space group from the structure
-            spacegroup = structure.spacegroup_hm
-            sg = gemmi.SpaceGroup(spacegroup)
-            operations = sg.operations()
-            
-            print(f"Structure space group: {spacegroup}")
-            print(f"Space group has {len(operations)} symmetry operations")
-            
-            # Create transformation matrices for each unique image_idx
-            pymol_transforms = []
-            operations_list = list(operations)  # Convert to list for indexing
-            
-            for image_idx in sorted(unique_image_indices):
-                if image_idx >= len(operations_list):
-                    print(f"Warning: image_idx {image_idx} exceeds available operations ({len(operations_list)})")
-                    continue
-                    
-                # Get the crystallographic operation for this image_idx
-                op = operations_list[image_idx]
-                
-                # Convert gemmi's 24-based rotation and translation to proper matrices
-                rot_matrix = np.array(op.rot) / 24.0  # gemmi uses 24-based system
-                trans_vector_frac = np.array(op.tran) / 24.0  # fractional translation
-                
-                # CRITICAL FIX: Convert fractional translations to Cartesian for PyMOL
-                # PyMOL expects transformation matrices with Cartesian translations in Angstroms
-                cell = structure.cell
-                trans_vector_cart = trans_vector_frac * np.array([cell.a, cell.b, cell.c])
-                
-                # Create 4x4 transformation matrix for PyMOL
-                transform_4x4 = np.eye(4)
-                transform_4x4[:3, :3] = rot_matrix
-                transform_4x4[:3, 3] = trans_vector_cart  # Use Cartesian translations
-                
-                # Convert to PyMOL format (flattened 16-element list)
-                flat_matrix = transform_4x4.flatten().tolist()
-                pymol_transforms.append(flat_matrix)
-                
-                print(f"Image_idx {image_idx}: Rotation\n{rot_matrix}")
-                print(f"Image_idx {image_idx}: Translation (fractional) {trans_vector_frac}")
-                print(f"Image_idx {image_idx}: Translation (Cartesian) {trans_vector_cart}")
-                
-                # Validate the transformation matrix
-                if self.validate_transformation_matrix(transform_4x4, op, structure):
-                    print(f"✓ Transformation matrix for image_idx {image_idx} validated")
-                else:
-                    print(f"✗ Transformation matrix for image_idx {image_idx} validation failed")
-            
-            print(f"Generated {len(pymol_transforms)} crystallographic transformation matrices")
-            return pymol_transforms
-            
-        except Exception as e:
-            print(f"Error extracting crystallographic transformations: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-
-    def apply_inverse_transformations_to_peaks(self, peaks_df, transformations, structure):
-        """Apply inverse transformations to map peaks from symmetry space back to original model space"""
-        try:
-            print("Applying inverse transformations to map symmetry features to original model space...")
-            
-            # Check if we have the required columns
-            if 'image_idx' not in peaks_df.columns:
-                print("Warning: image_idx column not found, returning original peaks")
-                return peaks_df
-            
-            # Create a copy of the DataFrame to modify
-            mapped_peaks_df = peaks_df.copy()
-            
-            # Get space group operations for inverse calculation
-            sg = gemmi.SpaceGroup(structure.spacegroup_hm)
-            operations = list(sg.operations())
-            
-            # Process each peak and map it back to original coordinate space
-            for idx, row in mapped_peaks_df.iterrows():
-                image_idx = int(row['image_idx'])
-                
-                # Skip identity transformation (image_idx = 0)
-                if image_idx == 0:
-                    continue
-                
-                if image_idx >= len(transformations):
-                    continue
-                
-                # Get the forward transformation matrix and compute its inverse
-                transform_flat = transformations[image_idx]
-                transform_4x4 = np.array(transform_flat).reshape(4, 4)
-                inverse_transform = np.linalg.inv(transform_4x4)
-                
-                # Transform peak coordinates from symmetry space to original space
-                peak_coords = np.array([row['peakx'], row['peaky'], row['peakz'], 1.0])
-                transformed_peak = inverse_transform @ peak_coords
-                
-                # Transform mark coordinates (start of displacement vectors)
-                mark_coords = np.array([row['markx'], row['marky'], row['markz'], 1.0])
-                transformed_mark = inverse_transform @ mark_coords
-                
-                # Update the DataFrame with transformed coordinates
-                mapped_peaks_df.at[idx, 'peakx'] = transformed_peak[0]
-                mapped_peaks_df.at[idx, 'peaky'] = transformed_peak[1]
-                mapped_peaks_df.at[idx, 'peakz'] = transformed_peak[2]
-                
-                mapped_peaks_df.at[idx, 'markx'] = transformed_mark[0]
-                mapped_peaks_df.at[idx, 'marky'] = transformed_mark[1]
-                mapped_peaks_df.at[idx, 'markz'] = transformed_mark[2]
-                
-                # Recalculate displacement vectors in original space
-                mapped_peaks_df.at[idx, 'deltax'] = transformed_peak[0] - transformed_mark[0]
-                mapped_peaks_df.at[idx, 'deltay'] = transformed_peak[1] - transformed_mark[1]
-                mapped_peaks_df.at[idx, 'deltaz'] = transformed_peak[2] - transformed_mark[2]
-            
-            print(f"Successfully mapped {len(mapped_peaks_df)} peaks to original coordinate space")
-            return mapped_peaks_df
-            
-        except Exception as e:
-            print(f"Error applying inverse transformations: {e}")
-            import traceback
-            traceback.print_exc()
-            return peaks_df  # Return original if transformation fails
-    
-    def validate_transformation_matrix(self, transform_4x4, gemmi_op, structure):
-        """Validate that our transformation matrix produces correct results"""
-        try:
-            # Get a test coordinate from the structure
-            model = structure[0]
-            test_atom = None
-            for chain in model:
-                for residue in chain:
-                    for atom in residue:
-                        test_atom = atom
-                        break
-                    if test_atom:
-                        break
-                if test_atom:
-                    break
-            
-            if not test_atom:
-                return False
-            
-            # Test coordinate
-            orig_pos = np.array([test_atom.pos.x, test_atom.pos.y, test_atom.pos.z])
-            
-            # Method 1: Apply our PyMOL matrix to Cartesian coordinates
-            cart_homogeneous = np.array([orig_pos[0], orig_pos[1], orig_pos[2], 1.0])
-            result_pymol = transform_4x4 @ cart_homogeneous
-            
-            # Method 2: Use Gemmi's crystallographic transformation
-            cell = structure.cell
-            frac_coord = cell.fractionalize(gemmi.Position(*orig_pos))
-            frac_pos = np.array([frac_coord.x, frac_coord.y, frac_coord.z])
-            transformed_frac = gemmi_op.apply_to_xyz(frac_pos.tolist())
-            result_gemmi = cell.orthogonalize(gemmi.Fractional(*transformed_frac))
-            result_gemmi_array = np.array([result_gemmi.x, result_gemmi.y, result_gemmi.z])
-            
-            # Compare results
-            diff = np.linalg.norm(result_pymol[:3] - result_gemmi_array)
-            tolerance = 1e-6
-            
-            if diff > tolerance:
-                print(f"Validation failed: difference = {diff:.9f} > {tolerance}")
-                print(f"  PyMOL result: {result_pymol[:3]}")
-                print(f"  Gemmi result: {result_gemmi_array}")
-                return False
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error during validation: {e}")
-            return False
-
-    def validate_symmetry_conversion(self, structure, transformations):
-        """Validate symmetry conversion using PyMOL's symexp-like approach"""
-        try:
-            print("\n" + "="*50)
-            print("VALIDATING SYMMETRY CONVERSION")
-            print("="*50)
-            
-            # This method would use PyMOL's symexp command in a real PyMOL environment
-            # For now, we simulate the validation by comparing with Gemmi's built-in methods
-            
-            print("Note: In a PyMOL environment, this would execute:")
-            sg_name = structure.spacegroup_hm.replace(' ', '')
-            cell = structure.cell
-            cell_params = f"{cell.a:.3f},{cell.b:.3f},{cell.c:.3f},{cell.alpha:.1f},{cell.beta:.1f},{cell.gamma:.1f}"
-            print(f"symexp sym, structure, '{sg_name}', ({cell_params})")
-            
-            print(f"\nValidating {len(transformations)} transformation matrices...")
-            
-            # Get space group operations for comparison
-            sg = gemmi.SpaceGroup(structure.spacegroup_hm)
-            operations = list(sg.operations())
-            
-            if len(transformations) != len(operations):
-                print(f"Warning: Number of transformations ({len(transformations)}) != number of operations ({len(operations)})")
-            
-            validation_results = []
-            for i, transform in enumerate(transformations):
-                if i < len(operations):
-                    # Reshape flattened matrix back to 4x4
-                    transform_4x4 = np.array(transform).reshape(4, 4)
-                    is_valid = self.validate_transformation_matrix(transform_4x4, operations[i], structure)
-                    validation_results.append(is_valid)
-                    print(f"Transformation {i}: {'✓ Valid' if is_valid else '✗ Invalid'}")
-                else:
-                    validation_results.append(False)
-                    print(f"Transformation {i}: ✗ No corresponding operation")
-            
-            all_valid = all(validation_results)
-            print(f"\nOverall validation: {'✓ All matrices valid' if all_valid else '✗ Some matrices invalid'}")
-            
-            return all_valid
-            
-        except Exception as e:
-            print(f"Error during symmetry validation: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def generate_vector_analytics(self, peaks_df):
-        """Generate analytics for displacement vectors"""
-        try:
-            # First, calculate per-atom vectors
-            atom_vectors = self.calculate_per_atom_vectors(peaks_df)
-            
-            if not atom_vectors:
-                print("Warning: No atom vectors calculated")
-                return None
-            
-            analytics = {
-                'total_atoms': len(atom_vectors),
-                'vector_magnitudes': [],
-                'residue_analysis': {},
-                'chain_analysis': {}
-            }
-            
-            for atom_key, vector_data in atom_vectors.items():
-                # Parse atom key
-                parts = atom_key.split(':')
-                chain = parts[0]
-                seqid = parts[1] 
-                residue = parts[2]
-                atom = parts[3]
-                
-                magnitude = np.linalg.norm(vector_data['avg_vector'])
-                analytics['vector_magnitudes'].append(magnitude)
-                
-                # Per residue analysis
-                res_key = f"{chain}:{seqid}:{residue}"
-                if res_key not in analytics['residue_analysis']:
-                    analytics['residue_analysis'][res_key] = {
-                        'atoms': [],
-                        'magnitudes': [],
-                        'vectors': []
-                    }
-                
-                analytics['residue_analysis'][res_key]['atoms'].append(atom)
-                analytics['residue_analysis'][res_key]['magnitudes'].append(magnitude)
-                analytics['residue_analysis'][res_key]['vectors'].append(vector_data['avg_vector'])
-                
-                # Per chain analysis
-                if chain not in analytics['chain_analysis']:
-                    analytics['chain_analysis'][chain] = {
-                        'residues': set(),
-                        'magnitudes': [],
-                        'vectors': []
-                    }
-                
-                analytics['chain_analysis'][chain]['residues'].add(res_key)
-                analytics['chain_analysis'][chain]['magnitudes'].append(magnitude)
-                analytics['chain_analysis'][chain]['vectors'].append(vector_data['avg_vector'])
-            
-            # Calculate summary statistics
-            magnitudes = np.array(analytics['vector_magnitudes'])
-            analytics['summary'] = {
-                'mean_magnitude': np.mean(magnitudes),
-                'std_magnitude': np.std(magnitudes),
-                'max_magnitude': np.max(magnitudes),
-                'min_magnitude': np.min(magnitudes),
-                'total_displacement': np.sum(magnitudes)
-            }
-            
-            return analytics
-            
-        except Exception as e:
-            print(f"Error generating vector analytics: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
-    def create_symmetry_pseudoatoms(self, peaks_df, base_obj):
-        """Fallback method: create pseudoatoms at symmetry positions"""
-        try:
-            # Validate required columns exist
-            required_columns = ['markx', 'marky', 'markz', 'chain', 'seqid', 'residue', 'atom']
-            missing_columns = [col for col in required_columns if col not in peaks_df.columns]
-            
-            if missing_columns:
-                print(f"Error: Missing required columns for symmetry pseudoatoms: {missing_columns}")
-                return []
-            
-            if peaks_df.empty:
-                print("Warning: Empty peaks DataFrame, no symmetry marks to create")
-                return []
-            
-            sym_obj = f"{base_obj}_sym_marks"
-            unique_marks = peaks_df[['markx', 'marky', 'markz', 'chain', 'seqid', 'residue', 'atom']].drop_duplicates()
-            
-            for _, mark in unique_marks.iterrows():
-                atom_name = f"{mark['chain']}_{mark['seqid']}_{mark['residue']}_{mark['atom']}"
-                cmd.pseudoatom(sym_obj, name=atom_name, pos=[mark['markx'], mark['marky'], mark['markz']], vdw=0.8)
-            
-            cmd.hide("everything", sym_obj)
-            return [sym_obj]
-            
-        except Exception as e:
-            print(f"Error creating symmetry pseudoatoms: {e}")
-            return []
-
 # Import the original IADDAT functions with bug fixes
 def map_threshold(realmap, threshold, cell, negative=False):
     """Find every grid point above threshold in map."""
@@ -1313,8 +883,8 @@ def IADDAT_peaks_table(input_PDB_filename, input_MTZ_filename, input_column_labe
         raise ValueError(f"Error: please provide column labels corresponding to structure factors and phases; eg: 'FoFo,PHFc'\nColumns in file: {input_MTZ.column_labels()}")
     
     sf = mtz_fphi.transform_f_phi_to_map(sample_rate=4)
-    asu_map = sf.masked_asu()
-    realmap = np.array(asu_map.grid, copy=False)
+    # Use full unit cell map instead of ASU-masked map to find peaks throughout the cell
+    realmap = np.array(sf, copy=False)
     
     if threshold_type == "sigma":
         sites_pos = map_threshold(realmap, realmap.std()*threshold_value, input_MTZ.cell, False)
